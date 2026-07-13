@@ -32,6 +32,15 @@ const CAPS: ConnectorCapabilities = {
   supportsSchemaInference: true,
 };
 
+const DELIMITER_ALIASES: Record<string, string> = { tab: '\t', pipe: '|', comma: ',', semicolon: ';' };
+
+/** Explicit delimiter from config wins; otherwise auto-detect from the header. */
+function resolveDelimiter(conn: ConnectionRuntime, headerLine: string): string {
+  const configured = conn.config.delimiter as string | undefined;
+  if (configured) return DELIMITER_ALIASES[configured.toLowerCase()] ?? configured;
+  return detectDelimiter(headerLine);
+}
+
 function detectDelimiter(headerLine: string): string {
   const candidates = [',', '\t', ';', '|'];
   let best = ',';
@@ -95,7 +104,7 @@ export class CsvConnector implements Connector {
 
     for await (const line of rl) {
       if (read === 0) {
-        delimiter = detectDelimiter(line);
+        delimiter = resolveDelimiter(conn, line);
         header = line.split(delimiter).map((h) => h.trim());
         header.forEach(() => columns.push([]));
       } else {
@@ -144,7 +153,7 @@ export class CsvConnector implements Connector {
 
     for await (const line of rl) {
       if (lineNo === 0) {
-        delimiter = detectDelimiter(line);
+        delimiter = resolveDelimiter(conn, line);
         header = line.split(delimiter).map((h) => h.trim());
       } else {
         const cells = line.split(delimiter);

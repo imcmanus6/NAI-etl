@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const TABS = [
   ['', 'Overview'],
+  ['/docs', 'Docs & layer'],
   ['/mappings', 'Mappings'],
   ['/validations', 'Validations & transforms'],
   ['/test', 'Test'],

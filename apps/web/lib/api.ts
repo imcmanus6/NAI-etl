@@ -172,8 +172,17 @@ export const discoverSchema = (connectionId: string) => post('/schemas/discover'
 export const uploadDdl = (name: string, ddl: string) => post('/schemas/upload/ddl', { name, ddl });
 export const uploadDictionary = (name: string, csv: string) =>
   post('/schemas/upload/dictionary', { name, csv });
-export const uploadSample = (name: string, format: 'csv' | 'json', content: string) =>
-  post('/schemas/upload/sample', { name, format, content });
+export const uploadSample = (
+  name: string,
+  format: 'csv' | 'json' | 'xml' | 'delimited',
+  content: string,
+  extra?: { delimiter?: string; recordPath?: string },
+) => post('/schemas/upload/sample', { name, format, content, ...extra });
+export const uploadFixedWidth = (name: string, layoutDoc: string, sample?: string) =>
+  post<{ schemaModelId: string; fields: number; rowsSampled: number; layout: Array<{ name: string; start: number; width: number; type?: string }> }>(
+    '/schemas/upload/fixed-width',
+    { name, layoutDoc, sample },
+  );
 export const snapshotSchema = (id: string) => post(`/schemas/${id}/snapshot`, {});
 
 // --- Source understanding & mapping (Phase 4) -------------------------------
@@ -325,3 +334,27 @@ export const approveVersion = (projectId: string, versionId: string, decision: '
   post<Version>(`/projects/${projectId}/versions/${versionId}/approve`, { decision, notes });
 export const generateDocument = (projectId: string, versionId: string) =>
   post<{ id: string; storageKey: string | null; markdown: string }>(`/projects/${projectId}/versions/${versionId}/document`, {});
+
+// --- Reference docs + transformation-layer generation -----------------------
+
+export interface ProjectDoc {
+  id: string;
+  title: string;
+  kind: string;
+  content: string;
+  createdAt: string;
+}
+export const listProjectDocs = (projectId: string) => api<ProjectDoc[]>(`/projects/${projectId}/docs`);
+export const addProjectDoc = (projectId: string, body: { title: string; kind: string; content: string }) =>
+  post<ProjectDoc>(`/projects/${projectId}/docs`, body);
+
+export interface GeneratedLayer {
+  docTermsUsed: number;
+  summary: { mappings: number; transformations: number; validations: number; unmappedSources: number; missingRequiredTargets: number };
+  transformations: Array<{ targetField: string; steps: Array<{ kind: string }>; explanation: string }>;
+  validations: Array<{ ruleType: string; fields: string[]; severity: string }>;
+  unmappedSources: string[];
+  missingRequiredTargets: string[];
+}
+export const generateLayer = (projectId: string, sourceSchemaId: string, targetSchemaId: string) =>
+  post<GeneratedLayer>(`/mappings/generate-layer/${projectId}`, { sourceSchemaId, targetSchemaId });

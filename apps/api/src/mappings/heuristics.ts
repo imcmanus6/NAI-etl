@@ -101,24 +101,36 @@ interface Candidate {
 function scoreCandidate(
   target: { entity: Entity; field: Field },
   source: { entity: Entity; field: Field },
+  glossary: Record<string, string>,
 ): Candidate {
   const tTokens = tokenize(target.field.name);
-  const sTokens = tokenize(source.field.name);
+  const nameTokens = tokenize(source.field.name);
   const reasons: string[] = [];
   const evidence: Evidence[] = [];
   const risks: string[] = [];
+
+  // Documentation: if the source field is defined in attached docs, fold its
+  // definition into the token set so cryptic names ("ACCT_NO" → "Account
+  // Number") match by meaning, and cite the doc as evidence.
+  const definition = glossary[source.field.name.toLowerCase()];
+  const docTokens = definition ? tokenize(definition) : [];
+  const sTokens = [...nameTokens, ...docTokens];
 
   let score = 0;
   if (source.field.name.toLowerCase() === target.field.name.toLowerCase()) {
     score = 1;
     reasons.push('exact name match');
   } else {
-    const overlap = jaccard(tTokens, sTokens);
+    const nameOverlap = jaccard(tTokens, nameTokens);
+    const docOverlap = docTokens.length ? jaccard(tTokens, docTokens) : 0;
+    const overlap = Math.max(nameOverlap, docOverlap);
     score = overlap * 0.9;
     if (overlap >= 0.99) reasons.push('normalised name match');
+    else if (docOverlap > nameOverlap && docOverlap > 0) reasons.push(`matched via documentation (${(docOverlap * 100).toFixed(0)}%)`);
     else if (overlap > 0) reasons.push(`token overlap ${(overlap * 100).toFixed(0)}%`);
   }
   evidence.push({ kind: 'column_name', detail: `${source.entity.name}.${source.field.name} ~ ${target.entity.name}.${target.field.name}` });
+  if (definition) evidence.push({ kind: 'documentation', detail: `${source.field.name} = "${definition}"` });
 
   // Type compatibility.
   const sg = typeGroup(source.field.dataType);
@@ -148,7 +160,11 @@ function isLookupCode(field: Field): boolean {
   return /(_cd|_code|status|type)$/.test(field.name.toLowerCase()) || (field.annotations?.enumValues?.length ?? 0) > 0;
 }
 
-export function suggestMappings(source: CanonicalSchema, target: CanonicalSchema): SuggestionResult {
+export function suggestMappings(
+  source: CanonicalSchema,
+  target: CanonicalSchema,
+  glossary: Record<string, string> = {},
+): SuggestionResult {
   const sourceFields = source.entities.flatMap((entity) => entity.fields.map((field) => ({ entity, field })));
   const suggestions: Suggestion[] = [];
   const usedSources = new Set<string>();
@@ -158,7 +174,7 @@ export function suggestMappings(source: CanonicalSchema, target: CanonicalSchema
     for (const field of entity.fields) {
       const targetRef = `${entity.name}.${field.name}`;
       const candidates = sourceFields
-        .map((s) => scoreCandidate({ entity, field }, s))
+        .map((s) => scoreCandidate({ entity, field }, s, glossary))
         .sort((a, b) => b.score - a.score);
       const best = candidates[0];
 

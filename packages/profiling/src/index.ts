@@ -21,14 +21,17 @@ export interface FieldStats extends FieldProfile {
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE = /^\+?[\d ()-]{7,}$/;
+// A phone number by value must have phone-like punctuation or a leading '+';
+// a pure run of digits (e.g. a date like 19850412 or an amount) is not a phone.
+const PHONE = /^\+?[\d][\d ()-]{6,}$/;
+const PHONE_LIKE = /[ ()+-]/;
 const CURRENCY = /^[$£€]\s?\d/;
 const DATE = /^\d{4}-\d{2}-\d{2}|^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/;
 
 function classifyPii(field: string, values: string[]): PiiCategory {
   const name = field.toLowerCase();
   if (/email/.test(name) || values.some((v) => EMAIL.test(v))) return 'email';
-  if (/phone|mobile|tel/.test(name) || values.some((v) => PHONE.test(v))) return 'phone';
+  if (/phone|mobile|tel/.test(name) || values.some((v) => PHONE.test(v) && PHONE_LIKE.test(v))) return 'phone';
   if (/first_?name|last_?name|surname|given|full_?name/.test(name)) return 'name';
   if (/dob|birth/.test(name)) return 'dob';
   if (/ssn|nino|passport|national/.test(name)) return 'national_id';

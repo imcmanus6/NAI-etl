@@ -17,6 +17,14 @@ class SuggestDto {
   projectId?: string;
 }
 
+class GenerateLayerDto {
+  @IsString()
+  sourceSchemaId!: string;
+
+  @IsString()
+  targetSchemaId!: string;
+}
+
 class FeedbackDto {
   @IsIn(['accepted', 'rejected', 'modified'])
   decision!: 'accepted' | 'rejected' | 'modified';
@@ -35,6 +43,11 @@ export class MappingsController {
   @Post('suggest')
   suggest(@CurrentUser() user: AuthClaims, @Body() dto: SuggestDto) {
     return this.mappings.suggest(user.tenantId, dto, user.sub);
+  }
+
+  @Post('generate-layer/:projectId')
+  generateLayer(@CurrentUser() user: AuthClaims, @Param('projectId') projectId: string, @Body() dto: GenerateLayerDto) {
+    return this.mappings.generateLayer(user.tenantId, projectId, dto.sourceSchemaId, dto.targetSchemaId, user.sub);
   }
 
   @Get('suggestions')

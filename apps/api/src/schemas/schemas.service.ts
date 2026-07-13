@@ -2,13 +2,20 @@ import { randomUUID, createHash } from 'node:crypto';
 import { writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { ConnectorType, LineageContext } from '@etl/shared-types';
-import type { CanonicalSchema, Entity } from '@etl/schema-model';
+import type { CanonicalSchema, CanonicalType, Entity, Field } from '@etl/schema-model';
 import { prisma } from '@etl/database';
-import { createConnectorRegistry, CsvConnector, JsonConnector } from '@etl/connectors';
+import { createConnectorRegistry, CsvConnector, JsonConnector, XmlConnector } from '@etl/connectors';
 import { createSecretsProvider } from '@etl/secrets';
-import { parseDdl, parseDataDictionary, parseOpenApi, type DictionaryRow } from '@etl/schema-discovery';
+import {
+  parseDdl,
+  parseDataDictionary,
+  parseOpenApi,
+  parseFixedWidthLayout,
+  readFixedWidthLine,
+  type DictionaryRow,
+} from '@etl/schema-discovery';
 import { profileSample } from '@etl/profiling';
 import { ObjectStore, loadStorageConfig } from '@etl/storage';
 import { recordAudit } from '@etl/audit';
@@ -111,23 +118,32 @@ export class SchemasService {
   }
 
   /**
-   * Sample file upload (CSV or JSON). Infers a schema and profiles a bounded
-   * sample (null rates, distinct, formats, PII, duplicates).
+   * Sample file upload (CSV / delimited / JSON / XML). Infers a schema and
+   * profiles a bounded sample (null rates, distinct, formats, PII, duplicates).
    */
   async ingestSample(
     tenantId: string,
-    opts: { name: string; format: 'csv' | 'json'; content: string; entityName?: string },
+    opts: {
+      name: string;
+      format: 'csv' | 'json' | 'xml' | 'delimited';
+      content: string;
+      entityName?: string;
+      delimiter?: string;
+      recordPath?: string;
+    },
     actorId?: string,
   ) {
     const entityName = opts.entityName ?? opts.name.replace(/\.[^.]+$/, '');
-    const tmp = join(tmpdir(), `etl-sample-${randomUUID()}.${opts.format}`);
+    const ext = opts.format === 'json' ? 'json' : opts.format === 'xml' ? 'xml' : 'txt';
+    const tmp = join(tmpdir(), `etl-sample-${randomUUID()}.${ext}`);
     await writeFile(tmp, opts.content, 'utf8');
     try {
-      const connector = opts.format === 'csv' ? new CsvConnector() : new JsonConnector();
+      const connector =
+        opts.format === 'json' ? new JsonConnector() : opts.format === 'xml' ? new XmlConnector() : new CsvConnector();
       const rt = {
         connectionId: 'inline-sample',
         connectorType: opts.format as ConnectorType,
-        config: { filePath: tmp, sampleRows: 500 },
+        config: { filePath: tmp, sampleRows: 500, delimiter: opts.delimiter, recordPath: opts.recordPath },
         secrets: {},
       };
       const entity: Entity = await connector.inferSchema!(rt, entityName);
@@ -176,6 +192,75 @@ export class SchemasService {
     } finally {
       await unlink(tmp).catch(() => undefined);
     }
+  }
+
+  /**
+   * Fixed-width intake driven by documentation. Parses the record-layout doc
+   * into field positions (no bespoke plugin), builds the canonical schema, and
+   * — if a data sample is supplied — profiles it using the derived layout. The
+   * layout is stored in provenance so a connection can read the real file later.
+   */
+  async ingestFixedWidth(
+    tenantId: string,
+    opts: { name: string; layoutDoc: string; sample?: string; entityName?: string },
+    actorId?: string,
+  ) {
+    const layout = parseFixedWidthLayout(opts.layoutDoc);
+    if (layout.length === 0) {
+      throw new BadRequestException('Could not derive any fields from the layout documentation');
+    }
+    const entityName = opts.entityName ?? opts.name.replace(/\.[^.]+$/, '');
+    const fwCanonical = (t: string | undefined): CanonicalType =>
+      t === 'number' ? 'decimal' : t === 'date' ? 'date' : t === 'boolean' ? 'boolean' : 'string';
+
+    const fields: Field[] = layout.map((f, i) => ({
+      id: `${entityName}.${f.name}`,
+      name: f.name,
+      ordinal: i,
+      dataType: fwCanonical(f.type),
+      nativeType: `fixed(${f.start},${f.width})`,
+      nullable: true,
+      isPrimaryKey: false,
+      isForeignKey: false,
+      description: f.description,
+      annotations: { detectedFormat: `fixed-width @${f.start}+${f.width}` },
+    }));
+
+    let rowsSampled = 0;
+    let stats: ReturnType<typeof profileSample> = [];
+    if (opts.sample) {
+      const records = opts.sample
+        .split(/\r?\n/)
+        .filter((l) => l.trim().length > 0)
+        .slice(0, 1000)
+        .map((line) => readFixedWidthLine(line, layout));
+      rowsSampled = records.length;
+      stats = profileSample(records);
+      const byName = new Map(stats.map((s) => [s.field, s]));
+      for (const f of fields) {
+        const s = byName.get(f.name);
+        if (!s) continue;
+        f.profile = { ...(f.profile ?? {}), ...s };
+        f.annotations = { ...(f.annotations ?? {}), pii: s.pii, isLikelyIdentifier: s.isLikelyIdentifier };
+      }
+    }
+
+    const schema: CanonicalSchema = {
+      id: `${entityName}-fixedwidth`,
+      name: opts.name,
+      intakeMethod: 'fixed_width',
+      entities: [{ id: entityName, name: entityName, kind: 'file', classification: 'unknown', fields }],
+      relationships: [],
+      provenance: { source: 'fixed_width', layout, rowsSampled },
+      createdAt: new Date().toISOString(),
+    };
+    const saved = await this.persist({ tenantId, actorId }, schema);
+    if (stats.length) {
+      await prisma.profileResult.create({
+        data: { tenantId, schemaModelId: saved.id, entityName, stats: { fields: stats } as object },
+      });
+    }
+    return { schemaModelId: saved.id, entities: 1, fields: fields.length, rowsSampled, layout };
   }
 
   /**

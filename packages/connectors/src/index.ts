@@ -9,20 +9,27 @@ import { CsvConnector } from './csv.js';
 import { JsonConnector } from './json.js';
 import { MysqlConnector } from './mysql.js';
 import { PostgresConnector } from './postgres.js';
+import { FixedWidthConnector } from './fixedwidth.js';
+import { XmlConnector } from './xml.js';
 
-export { CsvConnector, JsonConnector, MysqlConnector, PostgresConnector };
+export { CsvConnector, JsonConnector, MysqlConnector, PostgresConnector, FixedWidthConnector, XmlConnector };
 
 /** Build a registry populated with all MVP connectors. */
 export function createConnectorRegistry(): ConnectorRegistry {
   const registry = new ConnectorRegistry();
+  const csv = new CsvConnector();
   const connectors: Connector[] = [
     new PostgresConnector(),
     new MysqlConnector(),
-    new CsvConnector(),
+    csv,
     new JsonConnector(),
+    new FixedWidthConnector(),
+    new XmlConnector(),
   ];
   for (const c of connectors) {
     registry.register({ type: c.type, create: () => c });
   }
+  // Delimited files share the CSV connector (with an explicit `delimiter`).
+  registry.register({ type: 'delimited', create: () => csv });
   return registry;
 }

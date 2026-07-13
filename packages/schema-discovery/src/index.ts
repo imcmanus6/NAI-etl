@@ -11,6 +11,9 @@
  */
 import type { CanonicalSchema, CanonicalType, Entity, Field, Relationship } from '@etl/schema-model';
 
+export * from './fixed-width.js';
+export * from './doc.js';
+
 function mapSqlType(raw: string): CanonicalType {
   const s = raw.toLowerCase();
   if (/int|serial/.test(s)) return 'integer';

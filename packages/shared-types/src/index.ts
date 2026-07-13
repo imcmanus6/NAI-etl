@@ -61,6 +61,8 @@ export type ConnectorType =
   | 'csv'
   | 'delimited'
   | 'json'
+  | 'xml'
+  | 'fixedwidth'
   | 'excel'
   | 'sftp'
   | 's3';
@@ -70,8 +72,22 @@ export type SchemaIntakeMethod =
   | 'ddl_upload'
   | 'data_dictionary'
   | 'sample_inference'
+  | 'fixed_width'
   | 'manual'
   | 'openapi';
+
+/**
+ * One field in a fixed-width record layout. Positions are 1-based. This is what
+ * turns "write a plugin per format" into "give us the record layout" — the
+ * layout is data (often inferred from documentation), not code.
+ */
+export interface FixedWidthField {
+  name: string;
+  start: number; // 1-based column position
+  width: number;
+  type?: 'string' | 'number' | 'date' | 'boolean';
+  description?: string;
+}
 
 /** Lifecycle status of a project version. */
 export type VersionStatus =

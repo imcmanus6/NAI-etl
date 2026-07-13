@@ -43,8 +43,8 @@ class SampleDto {
   @MinLength(1)
   name!: string;
 
-  @IsIn(['csv', 'json'])
-  format!: 'csv' | 'json';
+  @IsIn(['csv', 'json', 'xml', 'delimited'])
+  format!: 'csv' | 'json' | 'xml' | 'delimited';
 
   @IsString()
   content!: string;
@@ -52,6 +52,28 @@ class SampleDto {
   @IsOptional()
   @IsString()
   entityName?: string;
+
+  @IsOptional()
+  @IsString()
+  delimiter?: string;
+
+  @IsOptional()
+  @IsString()
+  recordPath?: string;
+}
+
+class FixedWidthDto {
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @IsString()
+  @MinLength(4)
+  layoutDoc!: string;
+
+  @IsOptional()
+  @IsString()
+  sample?: string;
 }
 
 @ApiTags('schemas')
@@ -95,7 +117,24 @@ export class SchemasController {
   sample(@CurrentUser() user: AuthClaims, @Body() dto: SampleDto) {
     return this.schemas.ingestSample(
       user.tenantId,
-      { name: dto.name, format: dto.format, content: dto.content, entityName: dto.entityName },
+      {
+        name: dto.name,
+        format: dto.format,
+        content: dto.content,
+        entityName: dto.entityName,
+        delimiter: dto.delimiter,
+        recordPath: dto.recordPath,
+      },
+      user.sub,
+    );
+  }
+
+  /** Fixed-width intake: derive the layout from its documentation. */
+  @Post('upload/fixed-width')
+  fixedWidth(@CurrentUser() user: AuthClaims, @Body() dto: FixedWidthDto) {
+    return this.schemas.ingestFixedWidth(
+      user.tenantId,
+      { name: dto.name, layoutDoc: dto.layoutDoc, sample: dto.sample },
       user.sub,
     );
   }

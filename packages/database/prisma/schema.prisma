@@ -264,10 +264,30 @@ model Project {
   versions    ProjectVersion[]
   migration   MigrationPlan?
   runs        Run[]
+  documents   ProjectDocument[]
 
   @@index([tenantId])
   @@index([tenantId, customerId])
   @@map("projects")
+}
+
+// Reference documentation attached to a project (record layouts, data
+// dictionaries, business rules). Fed into the mapping engine so the AI can
+// understand cryptic field names and cite the docs as evidence.
+model ProjectDocument {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  projectId String   @map("project_id")
+  title     String
+  kind      String   @default("reference") // reference | record_layout | data_dictionary | business_rules
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@map("project_documents")
 }
 
 model MigrationPlan {

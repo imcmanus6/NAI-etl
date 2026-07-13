@@ -3,7 +3,10 @@ import type { CanonicalSchema } from '@etl/schema-model';
 import { prisma } from '@etl/database';
 import { recordAudit } from '@etl/audit';
 import { isLlmAvailable } from '@etl/ai-service';
+import { parseDocGlossary, glossaryMap } from '@etl/schema-discovery';
 import { suggestMappings, type Suggestion } from './heuristics.js';
+import { suggestValidations } from '../versions/validation-suggester.js';
+import { suggestTransformations } from '../versions/transformation-suggester.js';
 
 interface StoredMappingPayload extends Suggestion {
   sourceSchemaId: string;
@@ -25,38 +28,59 @@ export class MappingsService {
     return row.model as unknown as CanonicalSchema;
   }
 
+  /** Build a field-name → definition glossary from a project's reference docs. */
+  private async glossaryFor(tenantId: string, projectId?: string): Promise<Record<string, string>> {
+    if (!projectId) return {};
+    const docs = await prisma.projectDocument.findMany({ where: { tenantId, projectId } });
+    const entries = docs.flatMap((d) => parseDocGlossary(d.content));
+    return glossaryMap(entries);
+  }
+
+  private async persistMappingSuggestions(
+    tenantId: string,
+    projectId: string | undefined,
+    sourceSchemaId: string,
+    targetSchemaId: string,
+    suggestions: Suggestion[],
+  ) {
+    return Promise.all(
+      suggestions.map((s) =>
+        prisma.aiSuggestion.create({
+          data: {
+            tenantId,
+            projectId: projectId ?? null,
+            kind: 'mapping',
+            status: 'proposed',
+            payload: { ...s, sourceSchemaId, targetSchemaId } as object,
+          },
+        }),
+      ),
+    );
+  }
+
   async suggest(
     tenantId: string,
     input: { sourceSchemaId: string; targetSchemaId: string; projectId?: string },
     actorId?: string,
   ) {
-    const [source, target] = await Promise.all([
+    const [source, target, glossary] = await Promise.all([
       this.loadSchema(tenantId, input.sourceSchemaId),
       this.loadSchema(tenantId, input.targetSchemaId),
+      this.glossaryFor(tenantId, input.projectId),
     ]);
 
-    const { suggestions, unmappedSources, missingRequiredTargets } = suggestMappings(source, target);
+    const { suggestions, unmappedSources, missingRequiredTargets } = suggestMappings(source, target, glossary);
+    const docTerms = Object.keys(glossary).length;
     // The LLM (when configured) would refine here; the deterministic engine is
     // always the backbone so the feature works offline and is reproducible.
-    const generatedBy = isLlmAvailable() ? 'heuristic+llm-available' : 'heuristic';
+    const generatedBy = `${isLlmAvailable() ? 'heuristic+llm-available' : 'heuristic'}${docTerms ? `+docs(${docTerms})` : ''}`;
 
-    // Persist each suggestion as an AiSuggestion (draft).
-    const persisted = await Promise.all(
-      suggestions.map((s) =>
-        prisma.aiSuggestion.create({
-          data: {
-            tenantId,
-            projectId: input.projectId ?? null,
-            kind: 'mapping',
-            status: 'proposed',
-            payload: {
-              ...s,
-              sourceSchemaId: input.sourceSchemaId,
-              targetSchemaId: input.targetSchemaId,
-            } as object,
-          },
-        }),
-      ),
+    const persisted = await this.persistMappingSuggestions(
+      tenantId,
+      input.projectId,
+      input.sourceSchemaId,
+      input.targetSchemaId,
+      suggestions,
     );
 
     if (input.projectId) {
@@ -75,6 +99,79 @@ export class MappingsService {
       unmappedSources,
       missingRequiredTargets,
       suggestions: persisted.map((row) => ({ id: row.id, status: row.status, ...(row.payload as object) })),
+    };
+  }
+
+  /**
+   * One-shot transformation-layer generation: from a source file/schema + its
+   * documentation + the target, produce a complete proposed layer — mappings,
+   * value transformations, and validations — all as reviewable draft
+   * suggestions (never code, never auto-deployed).
+   */
+  async generateLayer(
+    tenantId: string,
+    projectId: string,
+    sourceSchemaId: string,
+    targetSchemaId: string,
+    actorId?: string,
+  ) {
+    const [source, target, glossary] = await Promise.all([
+      this.loadSchema(tenantId, sourceSchemaId),
+      this.loadSchema(tenantId, targetSchemaId),
+      this.glossaryFor(tenantId, projectId),
+    ]);
+
+    const mapping = suggestMappings(source, target, glossary);
+    const transformations = suggestTransformations(
+      mapping.suggestions.map((s) => ({
+        targetField: s.targetField,
+        sourceField: s.sourceField,
+        mappingType: s.mappingType,
+        risks: s.risks,
+      })),
+    );
+    const validations = suggestValidations(target);
+
+    // Persist all three kinds as reviewable suggestions.
+    const persistedMappings = await this.persistMappingSuggestions(
+      tenantId,
+      projectId,
+      sourceSchemaId,
+      targetSchemaId,
+      mapping.suggestions,
+    );
+    await Promise.all([
+      ...transformations.map((t) =>
+        prisma.aiSuggestion.create({ data: { tenantId, projectId, kind: 'transformation', status: 'proposed', payload: t as object } }),
+      ),
+      ...validations.map((v) =>
+        prisma.aiSuggestion.create({ data: { tenantId, projectId, kind: 'validation', status: 'proposed', payload: v as object } }),
+      ),
+    ]);
+
+    await recordAudit({
+      lineage: { tenantId, projectId },
+      actorId,
+      action: 'layer.generated',
+      subjectType: 'Project',
+      subjectId: projectId,
+      after: { mappings: mapping.suggestions.length, transformations: transformations.length, validations: validations.length },
+    });
+
+    return {
+      docTermsUsed: Object.keys(glossary).length,
+      summary: {
+        mappings: mapping.suggestions.length,
+        transformations: transformations.length,
+        validations: validations.length,
+        unmappedSources: mapping.unmappedSources.length,
+        missingRequiredTargets: mapping.missingRequiredTargets.length,
+      },
+      mappings: persistedMappings.map((row) => ({ id: row.id, status: row.status, ...(row.payload as object) })),
+      transformations,
+      validations,
+      unmappedSources: mapping.unmappedSources,
+      missingRequiredTargets: mapping.missingRequiredTargets,
     };
   }
 
