@@ -20,4 +20,14 @@ export class TenantsController {
       whiteLabel: tenant?.whiteLabel ?? {},
     };
   }
+
+  /** Customers belonging to the current tenant (used by the project wizard). */
+  @Get('customers')
+  customers(@CurrentUser() user: AuthClaims) {
+    return prisma.customer.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
 }

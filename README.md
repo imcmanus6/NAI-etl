@@ -5,10 +5,11 @@ software companies. AI does the initial analysis and mapping; humans review,
 correct, test and approve **deterministic, versioned, auditable** configuration
 before anything runs in production.
 
-> **Status:** Phase 1 + Phase 2 scaffold. The architecture, domain model and
-> executable interface contracts are complete; the apps boot and the core
-> engines are implemented. Stages beyond the MVP walking skeleton are marked
-> with `TODO` in code. See [`docs/`](./docs) for the full design.
+> **Status:** Phases 1–4 complete. Architecture + domain model + executable
+> contracts (P1), runnable monorepo/apps (P2), schema ingestion end-to-end (P3),
+> and AI-assisted source understanding + field mapping (P4) are all working and
+> verified end-to-end. Phases 5–6 (transform/validate test runs, migration &
+> reconciliation, versioning/approval UI) are next. See [`docs/`](./docs).
 
 ## What's here
 
@@ -17,10 +18,13 @@ before anything runs in production.
 | Architecture, domain model, workflows, AI tools, MVP plan | [`docs/`](./docs) | ✅ complete |
 | Canonical schema, connector SDK, mapping/transform/validation configs | `packages/*` | ✅ typed + deterministic core |
 | Control DB (Prisma) | `packages/database` | ✅ schema + seed |
-| NestJS API + OpenAPI | `apps/api` | ✅ boots; auth, tenants, projects, connections |
+| NestJS API + OpenAPI | `apps/api` | ✅ auth, tenants, projects, connections, schemas, mappings |
+| Schema ingestion (DB discover · DDL · dictionary · sample · OpenAPI) | `apps/api` `schemas/*` | ✅ canonical storage + profiling + snapshots |
+| AI source understanding + field mapping | `apps/api` `schemas/overview` · `mappings/*` | ✅ confidence + evidence + risks; accept/reject/edit → draft config |
 | Temporal worker | `apps/worker` | ✅ boots; schema-intake + test-run workflows |
-| Next.js white-label web | `apps/web` | ✅ boots; login + guided dashboard |
+| Next.js white-label web | `apps/web` | ✅ login, dashboard, connections, schema browser, source overview, mapping workspace |
 | Connectors (postgres, mysql, csv, json) | `packages/connectors` | ✅ test + discover + read |
+| AI layer (Anthropic + heuristic backbone) | `packages/ai-service` | ✅ provider-agnostic, structured output, redaction |
 
 ## Prerequisites
 

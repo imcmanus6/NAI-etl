@@ -10,14 +10,18 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@etl/ai-service": "workspace:*",
     "@etl/audit": "workspace:*",
     "@etl/auth": "workspace:*",
     "@etl/connectors": "workspace:*",
     "@etl/connector-sdk": "workspace:*",
     "@etl/database": "workspace:*",
     "@etl/observability": "workspace:*",
+    "@etl/profiling": "workspace:*",
+    "@etl/schema-discovery": "workspace:*",
     "@etl/schema-model": "workspace:*",
     "@etl/secrets": "workspace:*",
+    "@etl/storage": "workspace:*",
     "@etl/shared-types": "workspace:*",
     "@etl/tenancy": "workspace:*",
     "@nestjs/common": "^10.4.0",

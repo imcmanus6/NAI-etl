@@ -3,7 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module.js';
 import { HealthController } from './health/health.controller.js';
 import { ConnectionsModule } from './connections/connections.module.js';
+import { MappingsModule } from './mappings/mappings.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
+import { SchemasModule } from './schemas/schemas.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
 
 @Module({
@@ -13,6 +15,8 @@ import { TenantsModule } from './tenants/tenants.module.js';
     TenantsModule,
     ProjectsModule,
     ConnectionsModule,
+    SchemasModule,
+    MappingsModule,
   ],
   controllers: [HealthController],
 })

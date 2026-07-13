@@ -7,6 +7,7 @@
  * production config or processes production records.
  */
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { TASK_SCHEMAS, type AiTask, type TaskOutput } from './schemas.js';
 
 export * from './schemas.js';
@@ -149,7 +150,7 @@ export class AiService {
     const res = await this.provider.generateStructured({
       model,
       messages,
-      jsonSchema: zodToJsonSchemaLike(schema),
+      jsonSchema: zodToJsonSchema(schema, { target: 'jsonSchema7' }),
       maxOutputTokens: opts.maxOutputTokens,
       tools: opts.tools,
     });
@@ -165,12 +166,4 @@ export class AiService {
     // Validate — reject malformed output rather than passing guesses downstream.
     return schema.parse(res.data) as TaskOutput<T>;
   }
-}
-
-/**
- * Placeholder JSON-schema emitter. In the real build, use `zod-to-json-schema`.
- * Kept dependency-light here; providers accept the Zod shape description.
- */
-function zodToJsonSchemaLike(schema: z.ZodTypeAny): unknown {
-  return { $zodType: schema._def?.typeName ?? 'unknown' };
 }
