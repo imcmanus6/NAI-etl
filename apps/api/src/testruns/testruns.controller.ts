@@ -29,6 +29,10 @@ class RunDto {
   @IsOptional()
   @IsIn(['test', 'trial'])
   mode?: 'test' | 'trial';
+
+  @IsOptional()
+  @IsString()
+  deliverToConnectionId?: string;
 }
 
 @ApiTags('test-runs')

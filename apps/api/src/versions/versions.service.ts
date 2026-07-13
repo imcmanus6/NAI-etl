@@ -77,6 +77,21 @@ export class VersionsService {
     return draft;
   }
 
+  /** Directly set the draft version's field mappings (manual mapping / edit). */
+  async setDraftMappings(tenantId: string, projectId: string, mappings: unknown[], userId?: string) {
+    const draft = await this.getOrCreateDraft(tenantId, projectId, userId);
+    await prisma.projectVersion.update({ where: { id: draft.id }, data: { mappings: mappings as object } });
+    await recordAudit({
+      lineage: { tenantId, projectId, projectVersionId: draft.id },
+      actorId: userId,
+      action: 'mapping.set',
+      subjectType: 'ProjectVersion',
+      subjectId: draft.id,
+      after: { count: mappings.length },
+    });
+    return { draftVersionId: draft.id, count: mappings.length };
+  }
+
   // --- Validations ----------------------------------------------------------
 
   async suggestValidations(tenantId: string, projectId: string, targetSchemaId: string, userId?: string) {

@@ -18,6 +18,18 @@ interface RunInput {
   limit?: number;
   versionId?: string;
   mode?: 'test' | 'trial';
+  /** If set, accepted target-ready records are delivered to this destination. */
+  deliverToConnectionId?: string;
+}
+
+/** Strip the leading "entity." segment so keys become the destination's raw field names. */
+function flattenTargetKeys(target: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(target)) {
+    const dot = k.indexOf('.');
+    out[dot >= 0 ? k.slice(dot + 1) : k] = v;
+  }
+  return out;
 }
 
 /**
@@ -110,6 +122,7 @@ export class TestRunsService {
     const allFailures: ValidationFailure[] = [];
     const rejects: Array<{ recordKey: string; reason: string; failingRule: string }> = [];
     const targetHashes = new Map<string, number>();
+    const acceptedTargets: Record<string, unknown>[] = [];
     let accepted = 0;
     let rejected = 0;
 
@@ -123,6 +136,7 @@ export class TestRunsService {
 
       if (result.passed) {
         accepted += 1;
+        if (input.deliverToConnectionId) acceptedTargets.push(flattenTargetKeys(target));
       } else {
         rejected += 1;
         allFailures.push(...result.failures);
@@ -186,6 +200,35 @@ export class TestRunsService {
       });
     }
 
+    // Deliver accepted, target-ready records to the destination (e.g. Lateral).
+    let delivery: { connectionId: string; created: number; failed: number; skipped: number; errors: unknown[] } | null = null;
+    if (input.deliverToConnectionId && acceptedTargets.length > 0) {
+      const conn = await prisma.connection.findFirst({ where: { id: input.deliverToConnectionId, tenantId } });
+      if (conn && registry.has(conn.connectorType as ConnectorType)) {
+        const connector = registry.get(conn.connectorType as ConnectorType);
+        if (connector.write) {
+          const resolved = conn.secretRef ? await secrets.resolve(conn.secretRef) : {};
+          const result = await connector.write(
+            { connectionId: conn.id, connectorType: conn.connectorType as ConnectorType, config: conn.config as Record<string, unknown>, secrets: resolved },
+            acceptedTargets,
+            { entity: '', mode: 'insert' },
+          );
+          delivery = { connectionId: conn.id, created: result.created, failed: result.failed, skipped: result.skipped, errors: result.errors };
+          await prisma.runStage.create({
+            data: { runId: runRow.id, name: 'delivery', status: result.failed === 0 ? 'succeeded' : 'failed', detail: delivery as object },
+          });
+          await recordAudit({
+            lineage: { tenantId, customerId: project.customerId, environmentId: env.id, projectId, projectVersionId: version.id, runId: runRow.id },
+            actorId: userId,
+            action: 'testrun.delivered',
+            subjectType: 'Run',
+            subjectId: runRow.id,
+            after: delivery,
+          });
+        }
+      }
+    }
+
     await recordAudit({
       lineage: { tenantId, customerId: project.customerId, environmentId: env.id, projectId, projectVersionId: version.id, runId: runRow.id },
       actorId: userId,
@@ -203,6 +246,7 @@ export class TestRunsService {
       preview,
       rejects,
       explanation,
+      delivery,
     };
   }
 

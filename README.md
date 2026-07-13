@@ -76,6 +76,7 @@ config before anything runs in production. The LLM is never in the record path.
 | File formats: CSV · delimited (pipe/tab) · JSON · XML · **fixed-width from documentation** · **HL7 v2** | `packages/connectors` · `schema-discovery` | ✅ layout inferred from tabular/COBOL/position-range specs; HL7 batch → patient + transaction entities |
 | Documentation-assisted mapping | `apps/api` `mappings/*` · `schema-discovery/doc` | ✅ attach data dictionary/record layout; AI maps cryptic names & cites the doc |
 | One-shot transformation-layer generation | `apps/api` `mappings/generate-layer` | ✅ source + docs + target → mappings + transforms + validations as draft config |
+| Lateral delivery (destination connector) | `packages/connectors` `lateral` | ✅ writes mapped records to the Lateral import API; token via secrets; test-run can map→validate→deliver end-to-end |
 | AI source understanding + field mapping | `apps/api` `schemas/overview` · `mappings/*` | ✅ confidence + evidence + risks; accept/reject/edit → draft config |
 | Validation & transformation builders (+ AI suggest) | `apps/api` `versions/*` | ✅ suggest from constraints/risks; accept → draft config |
 | Deterministic test runs | `apps/api` `testruns/*` | ✅ map→transform→validate→reconcile; rejects + AI error explanation |

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsArray, IsIn, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import type { AuthClaims } from '@etl/auth';
 import type { ConnectorType } from '@etl/shared-types';
 import { prisma } from '@etl/database';
@@ -28,6 +28,11 @@ class CreateConnectionDto {
   @IsOptional()
   @IsString()
   secretRef?: string;
+}
+
+class DeliverDto {
+  @IsArray()
+  records!: Record<string, unknown>[];
 }
 
 @ApiTags('connections')
@@ -75,5 +80,33 @@ export class ConnectionsController {
       config: conn.config as Record<string, unknown>,
       secrets: resolved,
     });
+  }
+
+  /**
+   * Write records to a destination connection (e.g. the Lateral import API).
+   * Records must already be in the destination's field shape. Heavy delivery
+   * runs go through the workers; this covers interactive / test delivery.
+   */
+  @Post(':id/deliver')
+  async deliver(@CurrentUser() user: AuthClaims, @Param('id') id: string, @Body() dto: DeliverDto) {
+    const conn = await prisma.connection.findFirst({ where: { id, tenantId: user.tenantId } });
+    if (!conn) return { ok: false, message: 'Connection not found' };
+    if (!registry.has(conn.connectorType as ConnectorType)) {
+      return { ok: false, message: `No connector for ${conn.connectorType}` };
+    }
+    const connector = registry.get(conn.connectorType as ConnectorType);
+    if (!connector.write) return { ok: false, message: `${conn.connectorType} cannot write data` };
+    const resolved = conn.secretRef ? await secrets.resolve(conn.secretRef) : {};
+    const result = await connector.write(
+      {
+        connectionId: conn.id,
+        connectorType: conn.connectorType as ConnectorType,
+        config: conn.config as Record<string, unknown>,
+        secrets: resolved,
+      },
+      dto.records ?? [],
+      { entity: '', mode: 'insert' },
+    );
+    return { ok: result.failed === 0, ...result };
   }
 }

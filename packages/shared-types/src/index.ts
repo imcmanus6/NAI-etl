@@ -58,6 +58,7 @@ export type ConnectorType =
   | 'mysql'
   | 'sqlserver'
   | 'rest'
+  | 'lateral'
   | 'csv'
   | 'delimited'
   | 'json'

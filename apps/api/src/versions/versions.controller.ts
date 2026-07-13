@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
 import type { AuthClaims } from '@etl/auth';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt.guard.js';
 import { VersionsService } from './versions.service.js';
@@ -8,6 +8,11 @@ import { VersionsService } from './versions.service.js';
 class SuggestValidationsDto {
   @IsString()
   targetSchemaId!: string;
+}
+
+class SetMappingsDto {
+  @IsArray()
+  mappings!: unknown[];
 }
 
 class DecisionDto {
@@ -39,6 +44,11 @@ export class VersionsController {
   @Get('projects/:id/draft')
   draft(@CurrentUser() u: AuthClaims, @Param('id') id: string) {
     return this.versions.getOrCreateDraft(u.tenantId, id, u.sub);
+  }
+
+  @Put('projects/:id/draft/mappings')
+  setMappings(@CurrentUser() u: AuthClaims, @Param('id') id: string, @Body() dto: SetMappingsDto) {
+    return this.versions.setDraftMappings(u.tenantId, id, dto.mappings, u.sub);
   }
 
   // Declared before versions/:vid so it is not shadowed by the param route.

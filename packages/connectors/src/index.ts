@@ -12,8 +12,9 @@ import { PostgresConnector } from './postgres.js';
 import { FixedWidthConnector } from './fixedwidth.js';
 import { XmlConnector } from './xml.js';
 import { Hl7Connector } from './hl7.js';
+import { LateralConnector } from './lateral.js';
 
-export { CsvConnector, JsonConnector, MysqlConnector, PostgresConnector, FixedWidthConnector, XmlConnector, Hl7Connector };
+export { CsvConnector, JsonConnector, MysqlConnector, PostgresConnector, FixedWidthConnector, XmlConnector, Hl7Connector, LateralConnector };
 export { parseHl7, extractMedent, buildHl7Schema, type MedentRecords, type Hl7Message } from './hl7.js';
 
 /** Build a registry populated with all MVP connectors. */
@@ -28,6 +29,7 @@ export function createConnectorRegistry(): ConnectorRegistry {
     new FixedWidthConnector(),
     new XmlConnector(),
     new Hl7Connector(),
+    new LateralConnector(),
   ];
   for (const c of connectors) {
     registry.register({ type: c.type, create: () => c });
