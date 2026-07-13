@@ -9,7 +9,7 @@
  * `CREATE TABLE` shape); swap in a full SQL grammar (e.g. node-sql-parser) for
  * production breadth.
  */
-import type { CanonicalSchema, CanonicalType, Entity, Field } from '@etl/schema-model';
+import type { CanonicalSchema, CanonicalType, Entity, Field, Relationship } from '@etl/schema-model';
 
 function mapSqlType(raw: string): CanonicalType {
   const s = raw.toLowerCase();
@@ -29,6 +29,7 @@ function mapSqlType(raw: string): CanonicalType {
 /** Parse a subset of SQL DDL (CREATE TABLE ...) into canonical entities. */
 export function parseDdl(sql: string, name = 'ddl-import'): CanonicalSchema {
   const entities: Entity[] = [];
+  const relationships: Relationship[] = [];
   const tableRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?["`]?(\w+)["`]?\s*\(([\s\S]*?)\)\s*;/gi;
   let m: RegExpExecArray | null;
   while ((m = tableRe.exec(sql))) {
@@ -44,12 +45,21 @@ export function parseDdl(sql: string, name = 'ddl-import'): CanonicalSchema {
         pkInline[1]!.split(',').forEach((c) => pk.push(c.trim().replace(/["`]/g, '')));
         continue;
       }
+      // Table-level foreign key: FOREIGN KEY (col) REFERENCES other(col)
+      const tableFk = /foreign\s+key\s*\(([^)]+)\)\s+references\s+["`]?(\w+)["`]?(?:\s*\(([^)]+)\))?/i.exec(line);
+      if (tableFk) {
+        addRelationship(relationships, tableName, tableFk[1]!, tableFk[2]!, tableFk[3]);
+        continue;
+      }
       const col = /^["`]?(\w+)["`]?\s+([\w()]+)(.*)$/.exec(line);
       if (!col) continue;
       const colName = col[1]!;
       const rest = (col[3] ?? '').toLowerCase();
       const isPk = /primary\s+key/.test(rest);
       if (isPk) pk.push(colName);
+      // Column-level foreign key: col type REFERENCES other(col)
+      const colFk = /references\s+["`]?(\w+)["`]?(?:\s*\(([^)]+)\))?/i.exec(col[3] ?? '');
+      if (colFk) addRelationship(relationships, tableName, colName, colFk[1]!, colFk[2]);
       fields.push({
         id: `${tableName}.${colName}`,
         name: colName,
@@ -58,7 +68,7 @@ export function parseDdl(sql: string, name = 'ddl-import'): CanonicalSchema {
         nativeType: col[2],
         nullable: !/not\s+null/.test(rest) && !isPk,
         isPrimaryKey: isPk,
-        isForeignKey: /references/.test(rest),
+        isForeignKey: Boolean(colFk),
       });
     }
     for (const f of fields) if (pk.includes(f.name)) f.isPrimaryKey = true;
@@ -69,10 +79,32 @@ export function parseDdl(sql: string, name = 'ddl-import'): CanonicalSchema {
     name,
     intakeMethod: 'ddl_upload',
     entities,
-    relationships: [],
+    relationships,
     provenance: { source: 'ddl' },
     createdAt: new Date().toISOString(),
   };
+}
+
+function addRelationship(
+  out: Relationship[],
+  fromEntity: string,
+  fromCols: string,
+  toEntity: string,
+  toCols?: string,
+): void {
+  const from = fromCols.split(',').map((c) => c.trim().replace(/["`]/g, ''));
+  const to = (toCols ?? 'id').split(',').map((c) => c.trim().replace(/["`]/g, ''));
+  out.push({
+    id: `${fromEntity}_${from.join('_')}_fk`,
+    fromEntityId: fromEntity,
+    fromFields: from,
+    toEntityId: toEntity,
+    toFields: to,
+    cardinality: 'one_to_many',
+    declared: true,
+    certainty: 'confirmed',
+    evidence: [{ kind: 'foreign_key', detail: `${fromEntity}.${from.join(',')} references ${toEntity}` }],
+  });
 }
 
 export interface DictionaryRow {

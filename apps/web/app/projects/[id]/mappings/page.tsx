@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shell } from '../../../components/Shell';
+import { ProjectTabs } from '../../../components/ProjectTabs';
 import {
   getProject,
   listSchemas,
@@ -90,6 +91,7 @@ export default function MappingWorkspace({ params }: { params: { id: string } })
       title="Mapping workspace"
       subtitle={project ? `${project.name} — review AI suggestions, then accept to promote them into deterministic draft config.` : undefined}
     >
+      <ProjectTabs projectId={projectId} />
       <div className="card" style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="field" style={{ margin: 0 }}>

@@ -5,11 +5,12 @@ software companies. AI does the initial analysis and mapping; humans review,
 correct, test and approve **deterministic, versioned, auditable** configuration
 before anything runs in production.
 
-> **Status:** Phases 1–4 complete. Architecture + domain model + executable
-> contracts (P1), runnable monorepo/apps (P2), schema ingestion end-to-end (P3),
-> and AI-assisted source understanding + field mapping (P4) are all working and
-> verified end-to-end. Phases 5–6 (transform/validate test runs, migration &
-> reconciliation, versioning/approval UI) are next. See [`docs/`](./docs).
+> **Status:** Phases 1–6 complete — a working MVP. Architecture + contracts
+> (P1), runnable monorepo/apps (P2), schema ingestion (P3), AI source
+> understanding + field mapping (P4), transformation/validation builders +
+> deterministic test runs with rejects/reconciliation/AI error explanation (P5),
+> and migration sequencing + immutable versioning/approval + generated docs (P6)
+> are all working and verified end-to-end (API + browser). See [`docs/`](./docs).
 
 ## What's here
 
@@ -21,6 +22,10 @@ before anything runs in production.
 | NestJS API + OpenAPI | `apps/api` | ✅ auth, tenants, projects, connections, schemas, mappings |
 | Schema ingestion (DB discover · DDL · dictionary · sample · OpenAPI) | `apps/api` `schemas/*` | ✅ canonical storage + profiling + snapshots |
 | AI source understanding + field mapping | `apps/api` `schemas/overview` · `mappings/*` | ✅ confidence + evidence + risks; accept/reject/edit → draft config |
+| Validation & transformation builders (+ AI suggest) | `apps/api` `versions/*` | ✅ suggest from constraints/risks; accept → draft config |
+| Deterministic test runs | `apps/api` `testruns/*` | ✅ map→transform→validate→reconcile; rejects + AI error explanation |
+| Migration sequencing | `apps/api` `migration/*` | ✅ FK dependency waves (parents before children) |
+| Versioning, approval, generated docs | `apps/api` `versions/*` | ✅ immutable deploy, diff, mapping document from approved config |
 | Temporal worker | `apps/worker` | ✅ boots; schema-intake + test-run workflows |
 | Next.js white-label web | `apps/web` | ✅ login, dashboard, connections, schema browser, source overview, mapping workspace |
 | Connectors (postgres, mysql, csv, json) | `packages/connectors` | ✅ test + discover + read |

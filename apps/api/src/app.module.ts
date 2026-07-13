@@ -4,9 +4,12 @@ import { AuthModule } from './auth/auth.module.js';
 import { HealthController } from './health/health.controller.js';
 import { ConnectionsModule } from './connections/connections.module.js';
 import { MappingsModule } from './mappings/mappings.module.js';
+import { MigrationModule } from './migration/migration.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { SchemasModule } from './schemas/schemas.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
+import { TestRunsModule } from './testruns/testruns.module.js';
+import { VersionsModule } from './versions/versions.module.js';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { TenantsModule } from './tenants/tenants.module.js';
     ConnectionsModule,
     SchemasModule,
     MappingsModule,
+    VersionsModule,
+    TestRunsModule,
+    MigrationModule,
   ],
   controllers: [HealthController],
 })

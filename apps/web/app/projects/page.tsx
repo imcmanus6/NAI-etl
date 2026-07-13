@@ -72,7 +72,7 @@ export default function ProjectsPage() {
               <div>
                 <strong>{p.name}</strong> <span className="badge">{p.type}</span>
               </div>
-              <Link href={`/projects/${p.id}/mappings`}>Mapping workspace →</Link>
+              <Link href={`/projects/${p.id}`}>Open →</Link>
             </div>
           ))}
         </div>

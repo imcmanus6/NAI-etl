@@ -238,3 +238,90 @@ export const sendMappingFeedback = (
   decision: 'accepted' | 'rejected' | 'modified',
   editedPayload?: unknown,
 ) => post(`/mappings/suggestions/${suggestionId}/feedback`, { decision, editedPayload });
+
+// --- Validations & transformations (Phase 5) --------------------------------
+
+export interface ConfigSuggestion {
+  id: string;
+  status: string;
+  ruleType?: string;
+  level?: string;
+  fields?: string[];
+  severity?: string;
+  rationale?: string;
+  certainty?: Certainty;
+  targetField?: string;
+  steps?: Array<{ kind: string }>;
+  explanation?: string;
+}
+
+export const suggestValidations = (projectId: string, targetSchemaId: string) =>
+  post<ConfigSuggestion[]>(`/projects/${projectId}/validations/suggest`, { targetSchemaId });
+export const listValidationSuggestions = (projectId: string) =>
+  api<ConfigSuggestion[]>(`/projects/${projectId}/validations/suggestions`);
+export const suggestTransformations = (projectId: string) =>
+  post<ConfigSuggestion[]>(`/projects/${projectId}/transformations/suggest`, {});
+export const listTransformationSuggestions = (projectId: string) =>
+  api<ConfigSuggestion[]>(`/projects/${projectId}/transformations/suggestions`);
+export const decideConfigSuggestion = (suggestionId: string, decision: 'accepted' | 'rejected') =>
+  post(`/config/suggestions/${suggestionId}/decision`, { decision });
+
+// --- Test runs (Phase 5) ----------------------------------------------------
+
+export interface TestRunResult {
+  runId: string;
+  versionId: string;
+  metrics: {
+    sourceRecords: number;
+    acceptedRecords: number;
+    rejectedRecords: number;
+    duplicateRecords: number;
+    warnings: number;
+  };
+  reconciliation: { sourceCount: number; targetReadyCount: number; rejected: number; duplicateTargets: number; passed: boolean };
+  preview: Array<{ source: Record<string, unknown>; target: Record<string, unknown>; passed: boolean }>;
+  rejects: Array<{ recordKey: string; reason: string; failingRule: string }>;
+  explanation: {
+    plainEnglish: string;
+    probableCause: string;
+    suggestedActions: string[];
+    byField: Array<{ field: string; count: number; ruleTypes: string[] }>;
+  };
+}
+
+export const runTest = (projectId: string, sampleRecords: Record<string, unknown>[]) =>
+  post<TestRunResult>(`/projects/${projectId}/test`, { sampleRecords });
+export const listRuns = (projectId: string) => api<any[]>(`/projects/${projectId}/runs`);
+
+// --- Migration (Phase 6) ----------------------------------------------------
+
+export interface MigrationPlan {
+  planId: string;
+  sequence: Array<{ entity: string; order: number; wave: number; dependsOn: string[]; reason: string }>;
+  cyclesBrokenBetween: Array<[string, string]>;
+}
+export const buildMigrationPlan = (projectId: string, schemaId: string) =>
+  post<MigrationPlan>(`/projects/${projectId}/migration/plan`, { schemaId });
+export const getMigrationPlan = (projectId: string) =>
+  api<{ planId: string; entities: Array<{ entityName: string; sequence: number; wave: number; dependsOn: string[] }> } | null>(
+    `/projects/${projectId}/migration`,
+  );
+
+// --- Versions & approval (Phase 6) ------------------------------------------
+
+export interface Version {
+  id: string;
+  versionNumber: number;
+  status: string;
+  deployedAt: string | null;
+  createdAt: string;
+  mappings?: unknown[];
+  validations?: unknown[];
+}
+export const listVersions = (projectId: string) => api<Version[]>(`/projects/${projectId}/versions`);
+export const submitVersion = (projectId: string, versionId: string) =>
+  post<Version>(`/projects/${projectId}/versions/${versionId}/submit`, {});
+export const approveVersion = (projectId: string, versionId: string, decision: 'approved' | 'changes_requested', notes?: string) =>
+  post<Version>(`/projects/${projectId}/versions/${versionId}/approve`, { decision, notes });
+export const generateDocument = (projectId: string, versionId: string) =>
+  post<{ id: string; storageKey: string | null; markdown: string }>(`/projects/${projectId}/versions/${versionId}/document`, {});
