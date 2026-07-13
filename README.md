@@ -12,6 +12,58 @@ before anything runs in production.
 > and migration sequencing + immutable versioning/approval + generated docs (P6)
 > are all working and verified end-to-end (API + browser). See [`docs/`](./docs).
 
+## Run it locally
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm docker:up                       # Postgres, Temporal (+UI), MinIO
+pnpm db:generate && pnpm db:migrate && pnpm db:seed
+pnpm build --filter='./packages/*'   # build shared packages once
+pnpm dev                             # web :3000 · api :3001/api/docs · worker
+```
+
+Then open the app and sign in with the seeded account:
+
+| Surface | URL | Login |
+|---------|-----|-------|
+| **Web app** | http://localhost:3000 | `admin@example.com` / `demo1234!` (tenant `demo`) |
+| **API / OpenAPI** | http://localhost:3001/api/docs | Bearer token from `POST /api/auth/login` |
+| Temporal UI | http://localhost:8080 | — |
+| MinIO console | http://localhost:9001 | `minioadmin` / `minioadmin` |
+
+> **Port note:** the API defaults to **3001**. If that port is taken on your
+> machine, start it elsewhere and point the web app at it:
+> `API_PORT=3077 pnpm --filter @etl/api dev` and
+> `NEXT_PUBLIC_API_URL=http://localhost:3077 pnpm --filter @etl/web dev`.
+
+**A good first walk-through:** Schemas → *Fixed-width — from documentation* (paste
+a record layout, it derives the columns) → create a Project → attach a data
+dictionary under **Docs & layer** → *Generate transformation layer* → review in
+**Mappings** / **Validations** → **Test** with sample rows → **Versions** →
+approve + generate the mapping document.
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+  WEB["Next.js web<br/>guided wizard + AI panel"] -->|REST/JWT| API["NestJS API<br/>+ OpenAPI"]
+  API -->|start / query| T["Temporal"]
+  API --> PG[("Postgres<br/>control DB")]
+  API -.draft suggestions.-> AI["AI service<br/>(provider-agnostic)"]
+  T --> W["Stage workers<br/>extract · transform · validate ·<br/>load · reconcile"]
+  W --> PG
+  W --> S3[("S3 / MinIO")]
+  W -->|resolve creds| SEC[["Secrets manager"]]
+  W --> AI
+  W --> SRC[("Sources: DB · CSV · XML ·<br/>fixed-width · JSON")]
+  W --> DST[("Targets: DB · CSV")]
+```
+
+**Core principle:** the AI proposes drafts (mappings, transforms, validations,
+docs); humans review, test and approve **deterministic, versioned, auditable**
+config before anything runs in production. The LLM is never in the record path.
+
 ## What's here
 
 | Area | Where | Status |
