@@ -1,3 +1,4 @@
+import './load-env.js'; // must be first — populates process.env from the root .env
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';

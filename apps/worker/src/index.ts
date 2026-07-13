@@ -3,6 +3,7 @@
  * polls the task queue. In production this is split into one worker per stage
  * (see docs/WORKFLOWS.md); the MVP runs a single worker on the main queue.
  */
+import './load-env.js'; // must be first — populates process.env from the root .env
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { TASK_QUEUES } from '@etl/workflow-definitions';
 import { createLogger } from '@etl/observability';
