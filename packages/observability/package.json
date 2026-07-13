@@ -1,0 +1,18 @@
+{
+  "name": "@etl/observability",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "pino": "^9.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

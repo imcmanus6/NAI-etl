@@ -1,0 +1,543 @@
+// etl-platform — control database (Deliverable 4).
+//
+// This models the PLATFORM's own metadata: tenants, customers, users,
+// connections, schemas, projects, mappings, versions, runs, approvals, audit,
+// AI suggestions. Customer source/destination DATA is never stored here — that
+// flows through connectors and DuckDB in workers.
+//
+// Cross-cutting rules:
+//   * Every tenant-scoped table carries tenantId (indexed); Postgres RLS is
+//     applied as defence-in-depth (see migrations).
+//   * Credentials are NEVER stored here — only opaque `secretRef` pointers.
+//   * Deployed ProjectVersion, SchemaSnapshot and AuditEvent rows are
+//     write-once (enforced in the service layer + revoked grants).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  // White-label config (logo, product name, domain, terminology, theme tokens,
+  // enabled connectors/modules) as structured JSON — see WhiteLabelConfig type.
+  whiteLabel Json    @default("{}")
+  aiSettings Json    @default("{}") // tenant-level AI settings (models, redaction, opt-outs)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  customers    Customer[]
+  users        User[]
+  roles        Role[]
+  environments Environment[]
+  connections  Connection[]
+  schemas      SchemaModel[]
+  projects     Project[]
+  auditEvents  AuditEvent[]
+
+  @@map("tenants")
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  externalRef String? @map("external_ref")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model Environment {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String   // development | staging | production
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects Project[]
+  runs     Run[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("environments")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  email        String
+  displayName  String   @map("display_name")
+  passwordHash String?  @map("password_hash") // null when using external auth provider
+  externalId   String?  @map("external_id")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  name        String   // owner | admin | consultant | analyst | viewer
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model Membership {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  roleId     String   @map("role_id")
+  // Optional scoping: a membership can be limited to a customer or project.
+  customerId String?  @map("customer_id")
+  projectId  String?  @map("project_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([roleId])
+  @@map("memberships")
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity
+// ---------------------------------------------------------------------------
+
+model Connection {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  customerId    String?  @map("customer_id")
+  name          String
+  kind          String   // source | destination
+  connectorType String   @map("connector_type") // postgres | mysql | csv | json | rest | sftp | s3 ...
+  // Non-secret settings only (host, port, database, path, options).
+  config        Json     @default("{}")
+  // Opaque pointer into the secrets manager. NEVER a raw credential.
+  secretRef     String?  @map("secret_ref")
+  capabilities  Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schemas          SchemaModel[]
+  sourceProjects   Project[]     @relation("ProjectSource")
+  destProjects     Project[]     @relation("ProjectDestination")
+
+  @@index([tenantId])
+  @@index([tenantId, kind])
+  @@map("connections")
+}
+
+// ---------------------------------------------------------------------------
+// Schema & discovery
+// ---------------------------------------------------------------------------
+
+model SchemaModel {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  connectionId String?  @map("connection_id")
+  name         String
+  intakeMethod String   @map("intake_method") // db_introspection | ddl_upload | data_dictionary | sample_inference | manual | openapi
+  // The full canonical schema (entities, fields, relationships) as JSON.
+  // Large payloads may be offloaded to object storage with a pointer here.
+  model        Json     @default("{}")
+  provenance   Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection Connection?      @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  snapshots  SchemaSnapshot[]
+  profiles   ProfileResult[]
+
+  @@index([tenantId])
+  @@map("schema_models")
+}
+
+model SchemaSnapshot {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  schemaModelId String   @map("schema_model_id")
+  checksum      String
+  storageKey    String   @map("storage_key") // object-store key of the full snapshot
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  schemaModel    SchemaModel      @relation(fields: [schemaModelId], references: [id], onDelete: Cascade)
+  sourceVersions ProjectVersion[] @relation("SourceSnapshot")
+  targetVersions ProjectVersion[] @relation("TargetSnapshot")
+
+  @@index([tenantId])
+  @@index([schemaModelId])
+  @@map("schema_snapshots")
+}
+
+model ProfileResult {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  schemaModelId String   @map("schema_model_id")
+  entityName    String   @map("entity_name")
+  // Per-field profiling stats (null rates, distinct, formats, PII, dupes).
+  stats         Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  schemaModel SchemaModel @relation(fields: [schemaModelId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([schemaModelId])
+  @@map("profile_results")
+}
+
+// ---------------------------------------------------------------------------
+// Source understanding (AI, advisory)
+// ---------------------------------------------------------------------------
+
+model SourceOverview {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  schemaModelId String   @map("schema_model_id")
+  summary       Json     @default("{}") // table insights, relationships, join paths
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([schemaModelId])
+  @@map("source_overviews")
+}
+
+// ---------------------------------------------------------------------------
+// Projects & configuration
+// ---------------------------------------------------------------------------
+
+model Project {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  customerId       String   @map("customer_id")
+  name             String
+  product          String?
+  type             String   // integration | migration
+  integrationType  String?  @map("integration_type")
+  direction        String?
+  sourceConnId     String?  @map("source_conn_id")
+  destConnId       String?  @map("dest_conn_id")
+  defaultEnvId     String?  @map("default_env_id")
+  schedule         Json?    // cron / trigger config
+  notifications    Json     @default("{}")
+  currentVersionId String?  @map("current_version_id")
+  deletedAt        DateTime? @map("deleted_at") // soft delete
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sourceConn  Connection?      @relation("ProjectSource", fields: [sourceConnId], references: [id])
+  destConn    Connection?      @relation("ProjectDestination", fields: [destConnId], references: [id])
+  environment Environment?     @relation(fields: [defaultEnvId], references: [id])
+  versions    ProjectVersion[]
+  migration   MigrationPlan?
+  runs        Run[]
+
+  @@index([tenantId])
+  @@index([tenantId, customerId])
+  @@map("projects")
+}
+
+model MigrationPlan {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  projectId String   @unique @map("project_id")
+  scope     Json     @default("{}") // included entities, filters, historical-vs-active decisions
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  entities MigrationEntity[]
+
+  @@index([tenantId])
+  @@map("migration_plans")
+}
+
+model MigrationEntity {
+  id                  String   @id @default(uuid())
+  migrationPlanId     String   @map("migration_plan_id")
+  entityName          String   @map("entity_name")
+  sequence            Int
+  wave                Int      @default(1)
+  dependsOn           Json     @default("[]") // entity names this depends on
+  extractionStrategy  String   @default("full") @map("extraction_strategy") // full | filtered | date_based | incremental | cdc
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  migrationPlan MigrationPlan @relation(fields: [migrationPlanId], references: [id], onDelete: Cascade)
+
+  @@index([migrationPlanId])
+  @@map("migration_entities")
+}
+
+// ---------------------------------------------------------------------------
+// Versioning & approvals
+// ---------------------------------------------------------------------------
+
+model ProjectVersion {
+  id                 String   @id @default(uuid())
+  tenantId           String   @map("tenant_id")
+  projectId          String   @map("project_id")
+  versionNumber      Int      @map("version_number")
+  status             String   @default("draft") // draft | analysing | mapping | testing | awaiting_approval | approved | deployed | paused | retired
+  sourceSnapshotId   String?  @map("source_snapshot_id")
+  targetSnapshotId   String?  @map("target_snapshot_id")
+  // Deterministic, versioned config. Immutable once deployed.
+  mappings           Json     @default("[]")
+  transformations    Json     @default("[]")
+  validations        Json     @default("[]")
+  workflowSettings   Json     @default("{}")
+  errorHandling      Json     @default("{}")
+  schedule           Json?
+  testEvidence       Json     @default("{}")
+  deployedAt         DateTime? @map("deployed_at")
+  createdBy          String?  @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceSnapshot SchemaSnapshot? @relation("SourceSnapshot", fields: [sourceSnapshotId], references: [id])
+  targetSnapshot SchemaSnapshot? @relation("TargetSnapshot", fields: [targetSnapshotId], references: [id])
+  approvals      Approval[]
+  runs           Run[]
+  documents      GeneratedDocument[]
+
+  @@unique([projectId, versionNumber])
+  @@index([tenantId])
+  @@index([projectId, status])
+  @@map("project_versions")
+}
+
+model Approval {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  projectVersionId String   @map("project_version_id")
+  approvedBy       String   @map("approved_by")
+  decision         String   // approved | rejected | changes_requested
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  version ProjectVersion @relation(fields: [projectVersionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([projectVersionId])
+  @@map("approvals")
+}
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+model Run {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  customerId       String   @map("customer_id")
+  environmentId    String   @map("environment_id")
+  projectId        String   @map("project_id")
+  projectVersionId String   @map("project_version_id")
+  mode             String   // test | trial | delta | final | production
+  status           String   @default("queued") // queued | running | awaiting_input | succeeded | failed | cancelled
+  workflowId       String?  @map("workflow_id") // Temporal workflow id
+  currentStage     String?  @map("current_stage")
+  metrics          Json     @default("{}") // RunMetrics rollup
+  startedAt        DateTime? @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  environment    Environment     @relation(fields: [environmentId], references: [id])
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version        ProjectVersion  @relation(fields: [projectVersionId], references: [id])
+  stages         RunStage[]
+  reconciliations Reconciliation[]
+  rejects        RejectedRecord[]
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@index([tenantId, status])
+  @@map("runs")
+}
+
+model RunStage {
+  id        String   @id @default(uuid())
+  runId     String   @map("run_id")
+  name      String   // extraction | transformation | validation | loading | reconciliation ...
+  status    String   @default("queued")
+  startedAt DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  detail    Json     @default("{}")
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("run_stages")
+}
+
+model Reconciliation {
+  id        String   @id @default(uuid())
+  runId     String   @map("run_id")
+  kind      String   // counts | financial | referential | orphan | duplicate | field_level
+  result    Json     @default("{}")
+  passed    Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("reconciliations")
+}
+
+model RejectedRecord {
+  id           String   @id @default(uuid())
+  runId        String   @map("run_id")
+  recordKey    String   @map("record_key")
+  reason       String
+  failingRule  String?  @map("failing_rule")
+  storageKey   String?  @map("storage_key") // pointer to reject file / payload in object storage
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("rejected_records")
+}
+
+// ---------------------------------------------------------------------------
+// AI accounting
+// ---------------------------------------------------------------------------
+
+model AiSuggestion {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  projectId  String?  @map("project_id")
+  kind       String   // mapping | transformation | validation | overview | error_explanation | migration_order
+  payload    Json     @default("{}") // the structured suggestion + evidence + confidence
+  status     String   @default("proposed") // proposed | accepted | rejected | modified
+  promptVersionId String? @map("prompt_version_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  feedback AiFeedback[]
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@map("ai_suggestions")
+}
+
+model AiFeedback {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  suggestionId String   @map("suggestion_id")
+  userId       String?  @map("user_id")
+  decision     String   // accepted | rejected | modified
+  editedPayload Json?   @map("edited_payload")
+  comment      String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  suggestion AiSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([suggestionId])
+  @@map("ai_feedback")
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  task      String   // mapping | overview | validation | documentation ...
+  version   Int
+  template  String
+  model     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([task, version])
+  @@map("prompt_versions")
+}
+
+model AiUsage {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  task         String
+  model        String
+  inputTokens  Int      @map("input_tokens")
+  outputTokens Int      @map("output_tokens")
+  costUsd      Decimal  @default(0) @map("cost_usd") @db.Decimal(12, 6)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([tenantId, task])
+  @@map("ai_usage")
+}
+
+// ---------------------------------------------------------------------------
+// Audit & documentation
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  customerId    String?  @map("customer_id")
+  environmentId String?  @map("environment_id")
+  projectId     String?  @map("project_id")
+  projectVersionId String? @map("project_version_id")
+  runId         String?  @map("run_id")
+  actorId       String?  @map("actor_id")
+  action        String   // e.g. mapping.approved, version.deployed, connection.tested
+  subjectType   String   @map("subject_type")
+  subjectId     String   @map("subject_id")
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, subjectType, subjectId])
+  @@index([runId])
+  @@map("audit_events")
+}
+
+model GeneratedDocument {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  projectVersionId String?  @map("project_version_id")
+  kind             String   // mapping_doc | integration_spec | migration_spec | reconciliation_report ...
+  format           String   @default("markdown")
+  storageKey       String   @map("storage_key")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  version ProjectVersion? @relation(fields: [projectVersionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([projectVersionId])
+  @@map("generated_documents")
+}

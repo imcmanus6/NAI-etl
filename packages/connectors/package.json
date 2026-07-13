@@ -1,0 +1,23 @@
+{
+  "name": "@etl/connectors",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@etl/connector-sdk": "workspace:*",
+    "@etl/schema-model": "workspace:*",
+    "@etl/shared-types": "workspace:*",
+    "mysql2": "^3.11.0",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.6",
+    "typescript": "^5.5.0"
+  }
+}

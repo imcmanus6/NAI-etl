@@ -1,0 +1,41 @@
+{
+  "name": "etl-platform",
+  "version": "0.0.1",
+  "private": true,
+  "description": "White-label, AI-assisted ETL and data migration platform for enterprise software companies.",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @etl/database generate",
+    "db:migrate": "pnpm --filter @etl/database migrate:dev",
+    "db:seed": "pnpm --filter @etl/database seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "prettier": "^3.3.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "@swc/core",
+      "esbuild",
+      "prisma",
+      "protobufjs"
+    ]
+  }
+}

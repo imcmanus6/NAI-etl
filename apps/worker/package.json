@@ -1,0 +1,37 @@
+{
+  "name": "@etl/worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@etl/ai-service": "workspace:*",
+    "@etl/connectors": "workspace:*",
+    "@etl/connector-sdk": "workspace:*",
+    "@etl/database": "workspace:*",
+    "@etl/mapping-engine": "workspace:*",
+    "@etl/observability": "workspace:*",
+    "@etl/profiling": "workspace:*",
+    "@etl/schema-discovery": "workspace:*",
+    "@etl/schema-model": "workspace:*",
+    "@etl/secrets": "workspace:*",
+    "@etl/shared-types": "workspace:*",
+    "@etl/storage": "workspace:*",
+    "@etl/transformation-engine": "workspace:*",
+    "@etl/validation-engine": "workspace:*",
+    "@etl/workflow-definitions": "workspace:*",
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

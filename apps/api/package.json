@@ -1,0 +1,38 @@
+{
+  "name": "@etl/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@etl/audit": "workspace:*",
+    "@etl/auth": "workspace:*",
+    "@etl/connectors": "workspace:*",
+    "@etl/connector-sdk": "workspace:*",
+    "@etl/database": "workspace:*",
+    "@etl/observability": "workspace:*",
+    "@etl/schema-model": "workspace:*",
+    "@etl/secrets": "workspace:*",
+    "@etl/shared-types": "workspace:*",
+    "@etl/tenancy": "workspace:*",
+    "@nestjs/common": "^10.4.0",
+    "@nestjs/config": "^3.2.0",
+    "@nestjs/core": "^10.4.0",
+    "@nestjs/platform-express": "^10.4.0",
+    "@nestjs/swagger": "^7.4.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.0",
+    "@types/express": "^4.17.21",
+    "typescript": "^5.5.0"
+  }
+}
