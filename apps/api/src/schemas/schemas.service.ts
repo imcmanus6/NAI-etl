@@ -6,7 +6,15 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { ConnectorType, LineageContext } from '@etl/shared-types';
 import type { CanonicalSchema, CanonicalType, Entity, Field } from '@etl/schema-model';
 import { prisma } from '@etl/database';
-import { createConnectorRegistry, CsvConnector, JsonConnector, XmlConnector } from '@etl/connectors';
+import {
+  createConnectorRegistry,
+  CsvConnector,
+  JsonConnector,
+  XmlConnector,
+  parseHl7,
+  extractMedent,
+  buildHl7Schema,
+} from '@etl/connectors';
 import { createSecretsProvider } from '@etl/secrets';
 import {
   parseDdl,
@@ -261,6 +269,51 @@ export class SchemasService {
       });
     }
     return { schemaModelId: saved.id, entities: 1, fields: fields.length, rowsSampled, layout };
+  }
+
+  /**
+   * HL7 v2 intake (MEDENT Collection Interface and similar). Parses the batch
+   * file into two related canonical entities — patient + transaction — and
+   * profiles a bounded sample of each. The field layout follows the documented
+   * segment/sequence spec (see @etl/connectors hl7).
+   */
+  async ingestHl7(tenantId: string, opts: { name: string; content: string }, actorId?: string) {
+    const messages = parseHl7(opts.content);
+    if (messages.length === 0) {
+      throw new BadRequestException('No HL7 messages found (expected segment lines like MSH|…, PID|…)');
+    }
+    const { patients, transactions } = extractMedent(messages);
+    const schema = buildHl7Schema(opts.name);
+
+    // Profile each entity and merge stats onto its fields.
+    const byEntity: Record<string, Record<string, unknown>[]> = { patient: patients, transaction: transactions };
+    const saved = await this.persist({ tenantId, actorId }, schema);
+    for (const entity of schema.entities) {
+      const rows = byEntity[entity.name] ?? [];
+      const stats = profileSample(rows.slice(0, 1000));
+      const byName = new Map(stats.map((s) => [s.field, s]));
+      for (const f of entity.fields) {
+        const s = byName.get(f.name);
+        if (!s) continue;
+        f.profile = { ...(f.profile ?? {}), ...s };
+        f.annotations = { ...(f.annotations ?? {}), pii: s.pii, detectedFormat: s.detectedFormat, isLikelyIdentifier: s.isLikelyIdentifier };
+      }
+      if (stats.length) {
+        await prisma.profileResult.create({
+          data: { tenantId, schemaModelId: saved.id, entityName: entity.name, stats: { fields: stats } as object },
+        });
+      }
+    }
+    // Re-persist the model now that fields carry profiling annotations.
+    await prisma.schemaModel.update({ where: { id: saved.id }, data: { model: schema as unknown as object } });
+
+    return {
+      schemaModelId: saved.id,
+      entities: schema.entities.length,
+      messages: messages.length,
+      patients: patients.length,
+      transactions: transactions.length,
+    };
   }
 
   /**

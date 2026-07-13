@@ -76,6 +76,16 @@ class FixedWidthDto {
   sample?: string;
 }
 
+class Hl7Dto {
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @IsString()
+  @MinLength(8)
+  content!: string;
+}
+
 @ApiTags('schemas')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -137,6 +147,12 @@ export class SchemasController {
       { name: dto.name, layoutDoc: dto.layoutDoc, sample: dto.sample },
       user.sub,
     );
+  }
+
+  /** HL7 v2 batch intake (MEDENT Collection Interface): patient + transaction. */
+  @Post('upload/hl7')
+  hl7(@CurrentUser() user: AuthClaims, @Body() dto: Hl7Dto) {
+    return this.schemas.ingestHl7(user.tenantId, { name: dto.name, content: dto.content }, user.sub);
   }
 
   @Post(':id/snapshot')

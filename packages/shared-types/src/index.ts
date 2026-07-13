@@ -63,6 +63,7 @@ export type ConnectorType =
   | 'json'
   | 'xml'
   | 'fixedwidth'
+  | 'hl7'
   | 'excel'
   | 'sftp'
   | 's3';
@@ -73,6 +74,7 @@ export type SchemaIntakeMethod =
   | 'data_dictionary'
   | 'sample_inference'
   | 'fixed_width'
+  | 'hl7'
   | 'manual'
   | 'openapi';
 

@@ -2,14 +2,20 @@ import './load-env.js'; // must be first — populates process.env from the root
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { logger } from '@etl/observability';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Raw source files (e.g. batch HL7 feeds) are posted as JSON strings, so lift
+  // the default 100kb body limit. Large files still belong in object storage /
+  // the workers; this covers interactive uploads and samples.
+  app.useBodyParser('json', { limit: '50mb' });
+  app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
 
   const config = new DocumentBuilder()
     .setTitle('etl-platform API')

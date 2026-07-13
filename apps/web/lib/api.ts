@@ -183,6 +183,11 @@ export const uploadFixedWidth = (name: string, layoutDoc: string, sample?: strin
     '/schemas/upload/fixed-width',
     { name, layoutDoc, sample },
   );
+export const uploadHl7 = (name: string, content: string) =>
+  post<{ schemaModelId: string; entities: number; messages: number; patients: number; transactions: number }>(
+    '/schemas/upload/hl7',
+    { name, content },
+  );
 export const snapshotSchema = (id: string) => post(`/schemas/${id}/snapshot`, {});
 
 // --- Source understanding & mapping (Phase 4) -------------------------------

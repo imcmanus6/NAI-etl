@@ -10,6 +10,7 @@ import {
   uploadDdl,
   uploadDictionary,
   uploadFixedWidth,
+  uploadHl7,
   uploadSample,
   type Connection,
   type SchemaSummary,
@@ -34,7 +35,17 @@ const SAMPLE_LAYOUT = `Record layout (paste your spec — tabular, position rang
 const SAMPLE_FW = `000001JANE           DOE            19850412000010050
 000002ROBERT         ROE            19901130000025000`;
 
-type Mode = 'discover' | 'ddl' | 'dictionary' | 'sample' | 'fixedwidth';
+const SAMPLE_HL7 = `MSH|^~\\&|MEDENT|CLIENTCODE|LATERAL|LATERAL|20260504151435||ADT^A08|31|P|2.4|||AL|NE
+EVN|ADT^A08|20260504151435
+PID|1|43354|43354||OLIVER^GIOVANNY^^^^^^||20011206||||4111 BALBOA DR^^LIVERPOOL^NY^13090||(315)439-9768^(315)565-8979^^
+GT1|1|43354|OLIVER^GIOVANNY^^^^^^||4111 BALBOA DR^^LIVERPOOL^NY^13090|(315)439-9768^^||20011206
+MSH|^~\\&|MEDENT|CLIENTCODE|LATERAL|LATERAL|20260504151435||DFT^P03|32|P|2.4|||AL|NE
+PID|1|43354|43354||OLIVER^GIOVANNY^^^^^^||20011206
+PV1|||1^^^^^^^^LIVERPOOL||||||||||||||||||||||||||||||||||||||20260504|||||25.00|99.00|0.00|74.00|0.00
+FT1|1|8501||20240521||CG|||||99.00|||||1^^^^^^^^LIVERPOOL||||1508834524^POPOVICI^BRYAN^G
+FT1|3|8503||20240708||PY|||||74.00||||74.00|1^^^^^^^^LIVERPOOL||||1508834524^POPOVICI^BRYAN^G`;
+
+type Mode = 'discover' | 'ddl' | 'dictionary' | 'sample' | 'fixedwidth' | 'hl7';
 
 export default function SchemasPage() {
   const [schemas, setSchemas] = useState<SchemaSummary[]>([]);
@@ -62,6 +73,7 @@ export default function SchemasPage() {
     setMode(m);
     if (m === 'ddl') setText(SAMPLE_DDL);
     else if (m === 'fixedwidth') setText(SAMPLE_LAYOUT);
+    else if (m === 'hl7') setText(SAMPLE_HL7);
     else if (m === 'dictionary') setText('entity,field,type,nullable,description\ncustomers,acct_no,varchar,no,Account number');
     else setText('');
   }
@@ -71,15 +83,20 @@ export default function SchemasPage() {
     setError(null);
     setMsg(null);
     try {
-      let res: { schemaModelId: string; entities?: number; fields?: number; rowsSampled?: number };
+      let res: { schemaModelId: string; entities?: number; fields?: number; rowsSampled?: number; patients?: number; transactions?: number };
       if (mode === 'discover') res = (await discoverSchema(connectionId)) as any;
       else if (mode === 'ddl') res = (await uploadDdl(name, text)) as any;
       else if (mode === 'dictionary') res = (await uploadDictionary(name, text)) as any;
       else if (mode === 'fixedwidth') res = (await uploadFixedWidth(name, text, fwSample || undefined)) as any;
+      else if (mode === 'hl7') res = (await uploadHl7(name, text)) as any;
       else res = (await uploadSample(name, format, text, format === 'delimited' ? { delimiter } : undefined)) as any;
       setMsg(
         `Created schema ${res.schemaModelId}` +
-          (res.fields != null ? ` — ${res.fields} fields${res.rowsSampled ? `, ${res.rowsSampled} rows profiled` : ''}` : ` (${res.entities ?? '?'} entities)`),
+          (res.patients != null
+            ? ` — ${res.patients} patients, ${res.transactions} transactions (2 entities)`
+            : res.fields != null
+              ? ` — ${res.fields} fields${res.rowsSampled ? `, ${res.rowsSampled} rows profiled` : ''}`
+              : ` (${res.entities ?? '?'} entities)`),
       );
       await refresh();
     } catch (e) {
@@ -96,10 +113,12 @@ export default function SchemasPage() {
         ? 'Dictionary CSV (entity,field,type,nullable,description)'
         : mode === 'fixedwidth'
           ? 'Record-layout documentation (tabular / position ranges / COBOL copybook)'
-          : 'Sample content';
+          : mode === 'hl7'
+            ? 'HL7 v2 batch content (paste the .hl7/.txt file — ADT + DFT messages)'
+            : 'Sample content';
 
   return (
-    <Shell title="Schemas" subtitle="Provide schemas by DB discovery, DDL, data dictionary, sample file, or a fixed-width layout derived from its documentation.">
+    <Shell title="Schemas" subtitle="Provide schemas by DB discovery, DDL, data dictionary, sample file, a fixed-width layout from its documentation, or an HL7 v2 batch.">
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Add a schema</h3>
@@ -107,6 +126,7 @@ export default function SchemasPage() {
             <label>Intake method</label>
             <select value={mode} onChange={(e) => onModeChange(e.target.value as Mode)} style={selectStyle}>
               <option value="fixedwidth">Fixed-width — from documentation</option>
+              <option value="hl7">HL7 v2 batch (MEDENT / segmented)</option>
               <option value="sample">Sample file (CSV / JSON / XML / delimited)</option>
               <option value="ddl">Paste SQL DDL</option>
               <option value="dictionary">Paste data dictionary (CSV)</option>
