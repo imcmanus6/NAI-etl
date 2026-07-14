@@ -32,6 +32,18 @@ function flattenTargetKeys(target: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
+/** Render mapped target records as a CSV (columns in first-seen order). */
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return '';
+  const cols: string[] = [];
+  for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
+  const esc = (v: unknown) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
+}
+
 /**
  * Deterministic test-run executor (Phase 5–6).
  *
@@ -136,7 +148,9 @@ export class TestRunsService {
 
       if (result.passed) {
         accepted += 1;
-        if (input.deliverToConnectionId) acceptedTargets.push(flattenTargetKeys(target));
+        // Collect target-ready records (flattened to destination field names) for
+        // CSV output and/or delivery. Bounded by the sample size.
+        if (acceptedTargets.length < 10000) acceptedTargets.push(flattenTargetKeys(target));
       } else {
         rejected += 1;
         allFailures.push(...result.failures);
@@ -247,6 +261,9 @@ export class TestRunsService {
       rejects,
       explanation,
       delivery,
+      // Lateral-format CSV of the mapped, target-ready records (for file ingestion).
+      csvOutput: toCsv(acceptedTargets),
+      outputRecords: acceptedTargets.length,
     };
   }
 

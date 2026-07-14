@@ -301,10 +301,16 @@ export interface TestRunResult {
     suggestedActions: string[];
     byField: Array<{ field: string; count: number; ruleTypes: string[] }>;
   };
+  delivery: { connectionId: string; created: number; failed: number; skipped: number; errors: unknown[] } | null;
+  csvOutput: string;
+  outputRecords: number;
 }
 
-export const runTest = (projectId: string, sampleRecords: Record<string, unknown>[]) =>
-  post<TestRunResult>(`/projects/${projectId}/test`, { sampleRecords });
+export const runTest = (
+  projectId: string,
+  sampleRecords: Record<string, unknown>[],
+  opts?: { deliverToConnectionId?: string },
+) => post<TestRunResult>(`/projects/${projectId}/test`, { sampleRecords, ...opts });
 export const listRuns = (projectId: string) => api<any[]>(`/projects/${projectId}/runs`);
 
 // --- Migration (Phase 6) ----------------------------------------------------
