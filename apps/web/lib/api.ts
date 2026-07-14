@@ -309,7 +309,7 @@ export interface TestRunResult {
 export const runTest = (
   projectId: string,
   sampleRecords: Record<string, unknown>[],
-  opts?: { deliverToConnectionId?: string },
+  opts?: { deliverToConnectionId?: string; targetSchemaId?: string },
 ) => post<TestRunResult>(`/projects/${projectId}/test`, { sampleRecords, ...opts });
 export const listRuns = (projectId: string) => api<any[]>(`/projects/${projectId}/runs`);
 

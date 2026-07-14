@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { ConnectorType } from '@etl/shared-types';
+import type { CanonicalSchema } from '@etl/schema-model';
 import { prisma } from '@etl/database';
 import { createConnectorRegistry } from '@etl/connectors';
 import { createSecretsProvider } from '@etl/secrets';
@@ -20,6 +21,8 @@ interface RunInput {
   mode?: 'test' | 'trial';
   /** If set, accepted target-ready records are delivered to this destination. */
   deliverToConnectionId?: string;
+  /** If set, the CSV output uses this schema's full ordered column list. */
+  targetSchemaId?: string;
 }
 
 /** Strip the leading "entity." segment so keys become the destination's raw field names. */
@@ -32,16 +35,28 @@ function flattenTargetKeys(target: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
-/** Render mapped target records as a CSV (columns in first-seen order). */
-function toCsv(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return '';
-  const cols: string[] = [];
-  for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
+/**
+ * Render mapped target records as a CSV. If `columns` is given (the target
+ * schema's ordered field list), every column is emitted in that exact order
+ * with empty strings for unmapped fields — so the output matches the target
+ * import layout (e.g. a 147-column Universal Import file). Otherwise columns are
+ * inferred in first-seen order.
+ */
+function toCsv(rows: Record<string, unknown>[], columns?: string[]): string {
+  const cols =
+    columns && columns.length
+      ? columns
+      : (() => {
+          const c: string[] = [];
+          for (const r of rows) for (const k of Object.keys(r)) if (!c.includes(k)) c.push(k);
+          return c;
+        })();
+  if (cols.length === 0) return '';
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v);
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  return [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c] ?? '')).join(','))].join('\n');
 }
 
 /**
@@ -98,6 +113,16 @@ export class TestRunsService {
     if (!project) throw new NotFoundException('Project not found');
     const version = await this.resolveVersion(tenantId, projectId, input.versionId);
     const records = await this.getRecords(tenantId, input);
+
+    // Full ordered output columns (so the CSV matches the target import layout).
+    let outputColumns: string[] | undefined;
+    if (input.targetSchemaId) {
+      const schemaRow = await prisma.schemaModel.findFirst({ where: { id: input.targetSchemaId, tenantId } });
+      if (schemaRow) {
+        const schema = schemaRow.model as unknown as CanonicalSchema;
+        outputColumns = schema.entities.flatMap((e) => e.fields.map((f) => f.name));
+      }
+    }
 
     const mappingSet = {
       projectVersionId: version.id,
@@ -262,7 +287,7 @@ export class TestRunsService {
       explanation,
       delivery,
       // Lateral-format CSV of the mapped, target-ready records (for file ingestion).
-      csvOutput: toCsv(acceptedTargets),
+      csvOutput: toCsv(acceptedTargets, outputColumns),
       outputRecords: acceptedTargets.length,
     };
   }

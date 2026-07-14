@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Shell } from '../../../components/Shell';
 import { ProjectTabs } from '../../../components/ProjectTabs';
-import { listConnections, runTest, type Connection, type TestRunResult } from '../../../../lib/api';
+import { listConnections, listSchemas, runTest, type Connection, type SchemaSummary, type TestRunResult } from '../../../../lib/api';
 
 const DEFAULT_JSON = JSON.stringify(
   [
@@ -61,6 +61,8 @@ export default function TestPage({ params }: { params: { id: string } }) {
   const [sample, setSample] = useState(DEFAULT_JSON);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [deliverConnId, setDeliverConnId] = useState('');
+  const [schemas, setSchemas] = useState<SchemaSummary[]>([]);
+  const [outputSchemaId, setOutputSchemaId] = useState('');
   const [result, setResult] = useState<TestRunResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export default function TestPage({ params }: { params: { id: string } }) {
     listConnections()
       .then((c) => setConnections(c.filter((x) => x.kind === 'destination')))
       .catch(() => undefined);
+    listSchemas().then(setSchemas).catch(() => undefined);
   }, []);
 
   function recordsFromInput(): Record<string, unknown>[] {
@@ -80,7 +83,12 @@ export default function TestPage({ params }: { params: { id: string } }) {
     setError(null);
     try {
       const records = recordsFromInput();
-      setResult(await runTest(projectId, records, deliver && deliverConnId ? { deliverToConnectionId: deliverConnId } : undefined));
+      setResult(
+        await runTest(projectId, records, {
+          ...(deliver && deliverConnId ? { deliverToConnectionId: deliverConnId } : {}),
+          ...(outputSchemaId ? { targetSchemaId: outputSchemaId } : {}),
+        }),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -130,6 +138,13 @@ export default function TestPage({ params }: { params: { id: string } }) {
           style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, padding: 10, borderRadius: 'var(--radius)', border: '1px solid var(--color-border)' }}
         />
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+          <label className="subtle" style={{ fontSize: 13 }}>CSV layout</label>
+          <select value={outputSchemaId} onChange={(e) => setOutputSchemaId(e.target.value)} style={sel} title="Target schema whose full column order the CSV output should follow">
+            <option value="">mapped fields only</option>
+            {schemas.map((s) => (
+              <option key={s.id} value={s.id}>{s.name} (full layout)</option>
+            ))}
+          </select>
           <button className="btn" onClick={() => run(false)} disabled={busy}>
             {busy ? 'Running…' : 'Run mapping'}
           </button>

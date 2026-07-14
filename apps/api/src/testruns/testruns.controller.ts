@@ -33,6 +33,10 @@ class RunDto {
   @IsOptional()
   @IsString()
   deliverToConnectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  targetSchemaId?: string;
 }
 
 @ApiTags('test-runs')
