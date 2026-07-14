@@ -77,6 +77,8 @@ config before anything runs in production. The LLM is never in the record path.
 | Documentation-assisted mapping | `apps/api` `mappings/*` · `schema-discovery/doc` | ✅ attach data dictionary/record layout; AI maps cryptic names & cites the doc |
 | One-shot transformation-layer generation | `apps/api` `mappings/generate-layer` | ✅ source + docs + target → mappings + transforms + validations as draft config |
 | Lateral delivery (destination connector) | `packages/connectors` `lateral` | ✅ writes mapped records to the Lateral import API; token via secrets; test-run can map→validate→deliver end-to-end |
+| CSV file output (full target layout) | `apps/api` `testruns` | ✅ produce a target-layout CSV (e.g. 147-col Universal Import) — download or write to object storage |
+| Saved, scheduled pipelines | `apps/api` `schedule` (node-cron) | ✅ source→approved config→API/CSV on a cron; Run-now, run history; Schedule UI (Temporal is the production path) |
 | AI source understanding + field mapping | `apps/api` `schemas/overview` · `mappings/*` | ✅ confidence + evidence + risks; accept/reject/edit → draft config |
 | Validation & transformation builders (+ AI suggest) | `apps/api` `versions/*` | ✅ suggest from constraints/risks; accept → draft config |
 | Deterministic test runs | `apps/api` `testruns/*` | ✅ map→transform→validate→reconcile; rejects + AI error explanation |

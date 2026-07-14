@@ -9,6 +9,7 @@ const TABS = [
   ['/mappings', 'Mappings'],
   ['/validations', 'Validations & transforms'],
   ['/test', 'Test'],
+  ['/schedule', 'Schedule'],
   ['/migration', 'Migration'],
   ['/versions', 'Versions'],
 ];

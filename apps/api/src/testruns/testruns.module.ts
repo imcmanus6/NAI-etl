@@ -7,5 +7,6 @@ import { TestRunsService } from './testruns.service.js';
   imports: [AuthModule],
   controllers: [TestRunsController],
   providers: [TestRunsService],
+  exports: [TestRunsService],
 })
 export class TestRunsModule {}

@@ -311,7 +311,52 @@ export const runTest = (
   sampleRecords: Record<string, unknown>[],
   opts?: { deliverToConnectionId?: string; targetSchemaId?: string },
 ) => post<TestRunResult>(`/projects/${projectId}/test`, { sampleRecords, ...opts });
-export const listRuns = (projectId: string) => api<any[]>(`/projects/${projectId}/runs`);
+export const listRuns = (projectId: string) => api<Run[]>(`/projects/${projectId}/runs`);
+
+export interface Run {
+  id: string;
+  mode: string;
+  status: string;
+  metrics: { sourceRecords?: number; acceptedRecords?: number; rejectedRecords?: number } | null;
+  projectVersionId: string;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+// --- Pipeline schedule (saved, schedulable ETL) -----------------------------
+
+export interface PipelineSchedule {
+  id: string;
+  cron: string;
+  enabled: boolean;
+  sourceConnectionId: string | null;
+  sourceEntity: string | null;
+  destinationConnectionId: string | null;
+  outputMode: 'api' | 'csv' | 'both';
+  targetSchemaId: string | null;
+  lastRunAt: string | null;
+  lastRunId: string | null;
+  lastStatus: string | null;
+}
+
+export const getSchedule = (projectId: string) => api<PipelineSchedule | null>(`/projects/${projectId}/schedule`);
+export const saveSchedule = (
+  projectId: string,
+  body: {
+    cron: string;
+    enabled: boolean;
+    sourceConnectionId?: string;
+    sourceEntity?: string;
+    destinationConnectionId?: string;
+    outputMode: 'api' | 'csv' | 'both';
+    targetSchemaId?: string;
+  },
+) => api<PipelineSchedule>(`/projects/${projectId}/schedule`, { method: 'PUT', body: JSON.stringify(body) });
+export const runScheduleNow = (projectId: string) =>
+  post<{ runId: string; metrics: Record<string, number>; delivery: unknown; outputKey: string | null; outputRecords: number }>(
+    `/projects/${projectId}/schedule/run-now`,
+    {},
+  );
 
 // --- Migration (Phase 6) ----------------------------------------------------
 

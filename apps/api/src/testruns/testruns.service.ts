@@ -18,7 +18,7 @@ interface RunInput {
   sourceEntity?: string;
   limit?: number;
   versionId?: string;
-  mode?: 'test' | 'trial';
+  mode?: 'test' | 'trial' | 'delta' | 'final' | 'production';
   /** If set, accepted target-ready records are delivered to this destination. */
   deliverToConnectionId?: string;
   /** If set, the CSV output uses this schema's full ordered column list. */

@@ -27,7 +27,8 @@ export default function ProjectOverview({ params }: { params: { id: string } }) 
   const steps = [
     ['Mappings', 'Generate & review AI field mappings.', `/projects/${projectId}/mappings`],
     ['Validations & transforms', 'AI-suggested rules and value transforms.', `/projects/${projectId}/validations`],
-    ['Test', 'Run sample data through the pipeline.', `/projects/${projectId}/test`],
+    ['Test', 'Run sample data; download CSV or deliver via API.', `/projects/${projectId}/test`],
+    ['Schedule', 'Save as a pipeline and run on a cron.', `/projects/${projectId}/schedule`],
     ['Migration', 'Sequence entities by dependency.', `/projects/${projectId}/migration`],
     ['Versions', 'Submit, approve, deploy, document.', `/projects/${projectId}/versions`],
   ];

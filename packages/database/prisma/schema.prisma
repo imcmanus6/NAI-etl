@@ -265,10 +265,38 @@ model Project {
   migration   MigrationPlan?
   runs        Run[]
   documents   ProjectDocument[]
+  pipelineSchedule PipelineSchedule?
 
   @@index([tenantId])
   @@index([tenantId, customerId])
   @@map("projects")
+}
+
+// A saved, runnable ETL pipeline: source → (approved config) → destination /
+// file output, on a cron schedule. One per project. The scheduler executes due
+// pipelines; each execution is recorded as a Run.
+model PipelineSchedule {
+  id                      String   @id @default(uuid())
+  tenantId                String   @map("tenant_id")
+  projectId               String   @unique @map("project_id")
+  cron                    String   @default("0 * * * *") // node-cron expression
+  enabled                 Boolean  @default(false)
+  sourceConnectionId      String?  @map("source_connection_id")
+  sourceEntity            String?  @map("source_entity")
+  destinationConnectionId String?  @map("destination_connection_id")
+  outputMode              String   @default("api") // api | csv | both
+  targetSchemaId          String?  @map("target_schema_id")
+  lastRunAt               DateTime? @map("last_run_at")
+  lastRunId               String?  @map("last_run_id")
+  lastStatus              String?  @map("last_status")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([enabled])
+  @@map("pipeline_schedules")
 }
 
 // Reference documentation attached to a project (record layouts, data
