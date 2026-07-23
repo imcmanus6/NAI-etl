@@ -83,7 +83,8 @@ renderSide(); select(S.tables[0].name);
 </script>`;
 
 for (const s of DATA.schemas) {
-  const page = `<title>${s.label} — Schema Explorer</title>
+  const page = `<meta charset="utf-8">
+<title>${s.label} — Schema Explorer</title>
 ${STYLE}
 <header>
   <h1>${s.label} — Schema Explorer</h1>
