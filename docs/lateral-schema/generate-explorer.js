@@ -63,11 +63,10 @@ const STYLE = `<style>
 
 const APP = `<script id="data" type="application/json">__DATA__</script>
 <script>
-// theme toggle — decouple from OS so the page looks the same however it's opened
-(function(){ const r=document.documentElement, btn=document.getElementById('theme');
-  const saved=localStorage.getItem('lse-theme'); if(saved) r.setAttribute('data-theme',saved);
-  btn.onclick=()=>{ const cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
-    const next=cur==='dark'?'light':'dark'; r.setAttribute('data-theme',next); localStorage.setItem('lse-theme',next); }; })();
+// theme is set pre-paint in the head (defaults dark); this just wires the toggle
+(function(){ const r=document.documentElement;
+  document.getElementById('theme').onclick=()=>{ const next=r.getAttribute('data-theme')==='dark'?'light':'dark';
+    r.setAttribute('data-theme',next); localStorage.setItem('lse-theme',next); }; })();
 const S=JSON.parse(document.getElementById('data').textContent);
 const byName=Object.fromEntries(S.tables.map(t=>[t.name,t]));
 const refBy={}; for(const t of S.tables) for(const r of t.relationships){ (refBy[r.references]??=[]).push({from:t.name,column:r.column}); }
@@ -96,6 +95,7 @@ for (const s of DATA.schemas) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<script>document.documentElement.setAttribute('data-theme',localStorage.getItem('lse-theme')||'dark')</script>
 <title>${s.label} — Schema Explorer</title>
 ${STYLE}
 <header>
