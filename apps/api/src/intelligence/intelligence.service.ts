@@ -1,6 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import cron, { type ScheduledTask } from 'node-cron';
 import { prisma } from '@etl/database';
+import { ObjectStore, loadStorageConfig } from '@etl/storage';
 import {
+  FIELDS,
   METRICS,
   StubLateralActionClient,
   compileMetric,
@@ -10,6 +13,7 @@ import {
   summarizeEligibility,
   validateSql,
   type AccountRow,
+  type MetricQuery,
   type PopulationQuery,
   type Predicate,
 } from '@nai/core';
@@ -17,6 +21,17 @@ import { createAiProvider } from '@etl/ai-service';
 import { AiPlanner } from './aiPlanner.js';
 
 const lateral = new StubLateralActionClient();
+const OPERATORS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'is_true', 'is_false', 'older_than_days', 'within_days']);
+
+/** The built query behind a saved report (from the visual builder). */
+export interface ReportSpec {
+  metrics: string[];
+  dimensions?: string[];
+  filters?: Predicate[];
+  sort?: { field: string; direction: 'asc' | 'desc' }[];
+  limit?: number;
+  chart?: 'bar' | 'line' | 'none';
+}
 
 /**
  * NAI Analyst — Lateral Intelligence service (MVP, synthetic DB).
@@ -26,9 +41,33 @@ const lateral = new StubLateralActionClient();
  * (stub Lateral client) → audit. Uses @nai/core for planning/compiling/guarding.
  */
 @Injectable()
-export class IntelligenceService {
+export class IntelligenceService implements OnModuleInit {
   /** Claude-backed planner (Opus for NL→IR); deterministic fallback with no key. */
   private readonly planner = new AiPlanner(createAiProvider(process.env.NAI_AI_PROVIDER ?? 'anthropic', process.env));
+  /** node-cron jobs for scheduled reports, keyed by report id. */
+  private readonly reportJobs = new Map<string, ScheduledTask>();
+
+  /** Re-register cron jobs for enabled scheduled reports on boot. */
+  async onModuleInit() {
+    try {
+      const reports = await prisma.naiReport.findMany({ where: { enabled: true, NOT: { cron: null } } });
+      for (const r of reports) if (r.cron) this.registerReportJob(r.id, r.cron);
+    } catch {
+      /* db unavailable at boot — scheduler will register on next save */
+    }
+  }
+
+  private registerReportJob(id: string, expr: string) {
+    this.reportJobs.get(id)?.stop();
+    this.reportJobs.delete(id);
+    if (!cron.validate(expr)) return;
+    this.reportJobs.set(id, cron.schedule(expr, () => void this.runReportNow(id).catch(() => undefined)));
+  }
+
+  private unregisterReportJob(id: string) {
+    this.reportJobs.get(id)?.stop();
+    this.reportJobs.delete(id);
+  }
 
   /** Run a guard-validated SELECT against the reporting schema (read-only). */
   private async runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
@@ -36,7 +75,15 @@ export class IntelligenceService {
     if (!guard.ok) throw new BadRequestException(`Query blocked by SQL guard: ${guard.reason}`);
     // Read-only posture: guard guarantees SELECT-only; real deployments also use
     // a read-only role + read-only transaction. queryRawUnsafe runs the compiled SQL.
-    return prisma.$queryRawUnsafe<T[]>(sql);
+    const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(sql);
+    // Postgres count(*) comes back as BigInt, which JSON.stringify can't emit —
+    // coerce BigInt → Number so results serialize cleanly over the API.
+    for (const row of rows) {
+      for (const k of Object.keys(row)) {
+        if (typeof row[k] === 'bigint') row[k] = Number(row[k]);
+      }
+    }
+    return rows as T[];
   }
 
   private async audit(tenantId: string, userId: string | undefined, category: string, action: string, detail: unknown) {
@@ -212,4 +259,194 @@ export class IntelligenceService {
       take: 200,
     });
   }
+
+  // --- Report builder -------------------------------------------------------
+
+  /** Catalog for the builder pickers: certified metrics + group-by dimensions. */
+  reportCatalog() {
+    const metrics = Object.values(METRICS).map((m) => ({
+      metric_id: m.metric_id,
+      display_name: m.display_name,
+      description: m.description,
+      format: m.format,
+      certification: m.certification,
+      from: m.from,
+    }));
+    const dimensions = Object.values(FIELDS)
+      .filter((f) => f.dimension)
+      .map((f) => ({ name: f.name, label: f.label ?? f.name, view: f.view }));
+    const fields = Object.values(FIELDS).map((f) => ({ name: f.name, type: f.type, label: f.label ?? f.name }));
+    return { metrics, dimensions, fields };
+  }
+
+  /** Normalize a raw builder spec: keep metrics sharing one reporting view,
+   *  drop breakdowns/metrics that aren't compatible (with warnings). */
+  private sanitizeSpec(spec: ReportSpec): { metrics: string[]; dimensions: string[]; filters: Predicate[]; from: string; warnings: string[] } {
+    const warnings: string[] = [];
+    const known = (spec.metrics ?? []).filter((m) => METRICS[m]);
+    if (known.length === 0) throw new BadRequestException('Pick at least one certified metric.');
+    // All metrics in a report must resolve to the same reporting view so they
+    // can be grouped by a shared dimension and merged.
+    const from = METRICS[known[0]!]!.from;
+    const metrics = known.filter((m) => {
+      if (METRICS[m]!.from === from) return true;
+      warnings.push(`Metric "${METRICS[m]!.display_name}" uses a different data source and wasn't combined.`);
+      return false;
+    });
+    const dimOk = (name: string) => FIELDS[name]?.view === from || (name === 'collector' && (from === 'reporting.payment' || from === 'reporting.promise'));
+    const dimensions = (spec.dimensions ?? []).filter((d) => {
+      if (dimOk(d)) return true;
+      warnings.push(`Dropped breakdown "${d}" — not available for these metrics.`);
+      return false;
+    });
+    const filters = (spec.filters ?? []).filter((p) => FIELDS[p.field] && OPERATORS.has(p.operator));
+    return { metrics, dimensions, filters, from, warnings };
+  }
+
+  /**
+   * Run a report spec live (read-only, guarded). Each metric is compiled and run
+   * separately (the compiler is single-metric) then merged by the breakdown key,
+   * producing one row per dimension tuple with a column per metric.
+   */
+  async runReport(spec: ReportSpec) {
+    const { metrics, dimensions, filters, warnings } = this.sanitizeSpec(spec);
+    const keyOf = (r: Record<string, unknown>) => dimensions.map((d) => String(r[d] ?? '')).join('');
+    const byKey = new Map<string, Record<string, unknown>>();
+
+    for (const metric of metrics) {
+      const q: MetricQuery = { grain: 'aggregate', metrics: [metric], dimensions, filters };
+      const rows = await this.runSql<Record<string, unknown>>(compileMetric(q));
+      for (const r of rows) {
+        const k = keyOf(r);
+        const agg = byKey.get(k) ?? Object.fromEntries(dimensions.map((d) => [d, r[d]]));
+        agg[metric] = Number(r[metric] ?? 0);
+        byKey.set(k, agg);
+      }
+    }
+
+    let rows = [...byKey.values()];
+    // Backfill metric cells a metric's WHERE clause excluded (e.g. an
+    // active-only balance is 0 for a closed account) so every column is present.
+    for (const r of rows) for (const m of metrics) if (r[m] === undefined) r[m] = 0;
+    // Sort: honor the requested sort, else default to the first metric desc.
+    const sort = (spec.sort ?? []).filter((s) => metrics.includes(s.field) || dimensions.includes(s.field));
+    const sortBy = sort[0] ?? (dimensions.length ? { field: metrics[0]!, direction: 'desc' as const } : undefined);
+    if (sortBy) {
+      const dir = sortBy.direction === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        const av = a[sortBy.field] as number | string, bv = b[sortBy.field] as number | string;
+        return (typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv))) * dir;
+      });
+    }
+    if (typeof spec.limit === 'number' && spec.limit > 0) rows = rows.slice(0, Math.min(spec.limit, 1000));
+
+    return {
+      rows,
+      columns: [...dimensions, ...metrics],
+      metrics: metrics.map((id) => ({ id, ...METRICS[id]! })),
+      warnings,
+      dataFreshness: this.freshness(),
+    };
+  }
+
+  /** AI assist: plain-English → a prefilled builder spec (metric plan). */
+  async assistReport(tenantId: string, userId: string | undefined, nl: string) {
+    const planned = await this.planner.plan(nl);
+    await this.audit(tenantId, userId, 'ai', 'report.assist', { nl, source: planned.source });
+    if (planned.plan?.grain === 'aggregate') {
+      return {
+        understood: planned.understood,
+        assumptions: planned.assumptions,
+        planner: planned.source,
+        spec: { metrics: planned.plan.metrics, dimensions: planned.plan.dimensions ?? [], filters: planned.plan.filters ?? [], sort: planned.plan.sort, limit: planned.plan.limit, chart: (planned.plan.dimensions?.length ? 'bar' : 'none') as 'bar' | 'none' },
+      };
+    }
+    // population/clarify → no metric spec; surface the interpretation so the UI can guide the user
+    return { understood: planned.understood || '', assumptions: planned.assumptions ?? [], planner: planned.source, clarify: planned.clarify ?? 'Try asking for a metric, e.g. "net collections by client".', spec: null };
+  }
+
+  listReports(tenantId: string) {
+    return prisma.naiReport.findMany({ where: { tenantId }, orderBy: { updatedAt: 'desc' } });
+  }
+
+  async saveReport(tenantId: string, userId: string | undefined, name: string, spec: ReportSpec) {
+    this.sanitizeSpec(spec); // validate before persisting
+    const report = await prisma.naiReport.create({ data: { tenantId, name, spec: spec as object, createdBy: userId ?? null } });
+    await this.audit(tenantId, userId, 'report', 'report.created', { id: report.id, name });
+    return report;
+  }
+
+  async getReport(tenantId: string, id: string) {
+    const r = await prisma.naiReport.findFirst({ where: { id, tenantId } });
+    if (!r) throw new NotFoundException('Report not found');
+    return r;
+  }
+
+  /** Re-run a saved report live (dynamic — reflects the latest snapshot). */
+  async runSavedReport(tenantId: string, id: string) {
+    const r = await this.getReport(tenantId, id);
+    return { report: { id: r.id, name: r.name, spec: r.spec }, ...(await this.runReport(r.spec as unknown as ReportSpec)) };
+  }
+
+  /** CSV of a saved report's current rows. */
+  async exportReportCsv(tenantId: string, id: string): Promise<{ filename: string; csv: string }> {
+    const r = await this.getReport(tenantId, id);
+    const { rows, columns } = await this.runReport(r.spec as unknown as ReportSpec);
+    return { filename: `${r.name.replace(/[^\w.-]+/g, '_')}.csv`, csv: toCsv(columns, rows) };
+  }
+
+  /** Set/clear a report's cron schedule and (de)register the job. */
+  async scheduleReport(tenantId: string, id: string, cronExpr: string | null, enabled: boolean) {
+    const r = await this.getReport(tenantId, id);
+    if (cronExpr && !cron.validate(cronExpr)) throw new BadRequestException(`Invalid cron expression: ${cronExpr}`);
+    const updated = await prisma.naiReport.update({ where: { id: r.id }, data: { cron: cronExpr, enabled } });
+    if (enabled && cronExpr) this.registerReportJob(id, cronExpr);
+    else this.unregisterReportJob(id);
+    await this.audit(tenantId, undefined, 'report', 'report.scheduled', { id, cron: cronExpr, enabled });
+    return updated;
+  }
+
+  /** Run a report now: compute rows, write CSV to object storage, record status. */
+  async runReportNow(id: string) {
+    const r = await prisma.naiReport.findFirst({ where: { id } });
+    if (!r) return;
+    try {
+      const { rows, columns } = await this.runReport(r.spec as unknown as ReportSpec);
+      const csv = toCsv(columns, rows);
+      let key: string | null = null;
+      try {
+        const store = new ObjectStore(loadStorageConfig());
+        key = `reports/${r.tenantId}/${r.id}/${r.updatedAt.toISOString().slice(0, 10)}.csv`;
+        await store.putObject(key, csv);
+      } catch {
+        /* storage optional in dev — still record the run */
+      }
+      const updated = await prisma.naiReport.update({ where: { id }, data: { lastRunAt: new Date(), lastStatus: 'succeeded', lastRows: rows.length, lastOutputKey: key } });
+      await this.audit(r.tenantId, undefined, 'report', 'report.run', { id, rows: rows.length, outputKey: key });
+      return { rows: rows.length, outputKey: key, report: updated };
+    } catch (e) {
+      await prisma.naiReport.update({ where: { id }, data: { lastRunAt: new Date(), lastStatus: 'failed' } });
+      await this.audit(r.tenantId, undefined, 'report', 'report.run.failed', { id, error: (e as Error).message });
+      throw e;
+    }
+  }
+
+  async deleteReport(tenantId: string, id: string) {
+    await this.getReport(tenantId, id);
+    this.unregisterReportJob(id);
+    await prisma.naiReport.delete({ where: { id } });
+    await this.audit(tenantId, undefined, 'report', 'report.deleted', { id });
+    return { deleted: true };
+  }
+}
+
+/** Render rows to CSV with a fixed column order; quote/escape safely. */
+function toCsv(columns: string[], rows: Array<Record<string, unknown>>): string {
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const head = columns.map(esc).join(',');
+  const body = rows.map((r) => columns.map((c) => esc(r[c])).join(',')).join('\n');
+  return body ? `${head}\n${body}` : head;
 }

@@ -625,6 +625,28 @@ model NaiAuditEvent {
   @@map("nai_audit_events")
 }
 
+// Saved metric report from the visual report builder. `spec` holds the built
+// query (metrics/dimensions/filters/sort/limit + chart type); dynamic — re-runs
+// live against the read-only reporting schema. Optional cron schedules it.
+model NaiReport {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  name         String
+  spec         Json      @default("{}")
+  cron         String?
+  enabled      Boolean   @default(false)
+  lastRunAt    DateTime? @map("last_run_at")
+  lastStatus   String?   @map("last_status")
+  lastRows     Int?      @map("last_rows")
+  lastOutputKey String?  @map("last_output_key")
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("nai_reports")
+}
+
 model GeneratedDocument {
   id               String   @id @default(uuid())
   tenantId         String   @map("tenant_id")
