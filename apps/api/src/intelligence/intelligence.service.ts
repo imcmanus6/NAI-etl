@@ -299,7 +299,12 @@ export class IntelligenceService implements OnModuleInit {
       warnings.push(`Dropped breakdown "${d}" — not available for these metrics.`);
       return false;
     });
-    const filters = (spec.filters ?? []).filter((p) => FIELDS[p.field] && OPERATORS.has(p.operator));
+    const filters = (spec.filters ?? []).filter((p) => {
+      if (!FIELDS[p.field] || !OPERATORS.has(p.operator)) return false;
+      if (FIELDS[p.field]!.view === from) return true;
+      warnings.push(`Dropped filter on "${p.field}" — not available for these metrics.`);
+      return false;
+    });
     return { metrics, dimensions, filters, from, warnings };
   }
 

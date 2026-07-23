@@ -91,7 +91,17 @@ export function compileMetric(p: MetricQuery): string {
     return { sql: f.column, alias: d };
   });
   const selDims = dims.map((d) => `${d.sql} as ${d.alias}`);
-  const wh = m.where ? `where ${m.where}` : '';
+  // Combine the metric's certified static WHERE with the query's own filters.
+  // Filters must reference a column on the metric's view (else they'd hit a
+  // column that doesn't exist there).
+  const filterParts = (p.filters ?? []).map((f) => {
+    const fd = FIELDS[f.field];
+    if (!fd) throw new Error(`invalid filter field: ${f.field}`);
+    if (fd.view !== m.from) throw new Error(`filter field "${f.field}" not available on ${m.from}`);
+    return predSql(f);
+  });
+  const whereParts = [m.where, ...filterParts].filter(Boolean);
+  const wh = whereParts.length ? `where ${whereParts.join(' and ')}` : '';
   const group = dims.length ? `group by ${dims.map((d) => d.sql).join(', ')}` : '';
   const order = dims.length ? `order by ${m.metric_id} desc nulls last` : '';
   const lim = p.limit ? `limit ${Math.min(Math.max(1, p.limit), 1000)}` : '';

@@ -26,6 +26,24 @@ const fmt = (v: unknown, format?: string) => {
   return n.toLocaleString();
 };
 
+type Filter = { field: string; operator: string; value?: string | number };
+
+const OP_LABELS: Record<string, string> = {
+  eq: '=', neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤',
+  older_than_days: 'older than (days)', within_days: 'within (days)',
+  is_true: 'is true', is_false: 'is false',
+};
+/** Operators valid for a field's type. */
+const opsForType = (t: string): string[] =>
+  t === 'boolean' ? ['is_true', 'is_false']
+    : t === 'date' ? ['older_than_days', 'within_days']
+      : t === 'number' ? ['eq', 'neq', 'gt', 'gte', 'lt', 'lte']
+        : ['eq', 'neq'];
+const opNeedsValue = (op: string) => op !== 'is_true' && op !== 'is_false';
+/** Drop filters whose operator needs a value but none was entered. */
+const cleanFilters = (fs: Filter[]): Filter[] =>
+  fs.filter((f) => f.field && (!opNeedsValue(f.operator) || (f.value !== '' && f.value !== undefined && f.value !== null)));
+
 /** Simple theme-aware vertical bar chart (first metric, by dimension). */
 function BarChart({ rows, dim, metric, format }: { rows: Array<Record<string, unknown>>; dim: string; metric: string; format?: string }) {
   const data = rows.slice(0, 12).map((r) => ({ label: String(r[dim] ?? ''), value: Number(r[metric] ?? 0) }));
@@ -51,6 +69,7 @@ export default function ReportsPage() {
   // builder state
   const [metrics, setMetrics] = useState<string[]>([]);
   const [dimension, setDimension] = useState('');
+  const [filters, setFilters] = useState<Filter[]>([]);
   const [limit, setLimit] = useState(12);
   const [nl, setNl] = useState('current outstanding balance and account count by workflow');
   const [assistNote, setAssistNote] = useState<{ understood: string; planner: string; clarify?: string } | null>(null);
@@ -63,12 +82,37 @@ export default function ReportsPage() {
   }, []);
   const refreshSaved = () => listReports().then(setSaved).catch(() => undefined);
 
-  const spec = useMemo<ReportSpec>(() => ({ metrics, dimensions: dimension ? [dimension] : [], limit, chart: dimension ? 'bar' : 'none' }), [metrics, dimension, limit]);
+  const spec = useMemo<ReportSpec>(() => ({ metrics, dimensions: dimension ? [dimension] : [], filters: cleanFilters(filters), limit, chart: dimension ? 'bar' : 'none' }), [metrics, dimension, filters, limit]);
   const metricFormat = useMemo(() => Object.fromEntries((result?.metrics ?? []).map((m) => [m.id, m.format])), [result]);
+  const fieldType = (name: string) => cat?.fields.find((f) => f.name === name)?.type ?? 'string';
 
   function toggleMetric(id: string) {
     setMetrics((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
   }
+
+  // --- filter editor ---
+  function addFilter() {
+    const f = cat?.fields[0];
+    if (!f) return;
+    const op = opsForType(f.type)[0]!;
+    setFilters((fs) => [...fs, { field: f.name, operator: op, value: opNeedsValue(op) ? (f.type === 'string' ? '' : 0) : undefined }]);
+  }
+  function updateFilter(i: number, patch: Partial<Filter>) {
+    setFilters((fs) => fs.map((f, j) => {
+      if (j !== i) return f;
+      const next = { ...f, ...patch };
+      if (patch.field !== undefined) {
+        // field changed → reset operator + value to the new type's default
+        const op = opsForType(fieldType(patch.field))[0]!;
+        next.operator = op;
+        next.value = opNeedsValue(op) ? (fieldType(patch.field) === 'string' ? '' : 0) : undefined;
+      } else if (patch.operator !== undefined) {
+        next.value = opNeedsValue(patch.operator) ? (next.value ?? (fieldType(next.field) === 'string' ? '' : 0)) : undefined;
+      }
+      return next;
+    }));
+  }
+  const removeFilter = (i: number) => setFilters((fs) => fs.filter((_, j) => j !== i));
 
   async function run(s: ReportSpec = spec) {
     if (!s.metrics.length) {
@@ -96,6 +140,7 @@ export default function ReportsPage() {
       if (a.spec) {
         setMetrics(a.spec.metrics);
         setDimension(a.spec.dimensions?.[0] ?? '');
+        setFilters((a.spec.filters ?? []) as Filter[]);
         if (a.spec.limit) setLimit(a.spec.limit);
         await run({ ...a.spec, chart: a.spec.dimensions?.length ? 'bar' : 'none' });
       }
@@ -123,6 +168,7 @@ export default function ReportsPage() {
   function open(r: SavedReport) {
     setMetrics(r.spec.metrics ?? []);
     setDimension(r.spec.dimensions?.[0] ?? '');
+    setFilters((r.spec.filters ?? []) as Filter[]);
     setLimit(r.spec.limit ?? 12);
     setAssistNote(null);
     run(r.spec);
@@ -199,6 +245,41 @@ export default function ReportsPage() {
               <option key={d.name} value={d.name}>{d.label}</option>
             ))}
           </select>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '20px 0 8px' }}>
+            <h3 style={{ margin: 0 }}>Filters</h3>
+            <button className="chip" onClick={addFilter} style={{ margin: 0 }}>+ Add</button>
+          </div>
+          {filters.length === 0 && <p className="subtle" style={{ margin: 0, fontSize: 13 }}>No filters — all accounts.</p>}
+          {filters.map((f, i) => {
+            const type = fieldType(f.field);
+            return (
+              <div key={i} style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 8 }}>
+                <select value={f.field} onChange={(e) => updateFilter(i, { field: e.target.value })} style={{ ...selectStyle, marginBottom: 6 }}>
+                  {cat?.fields.map((fl) => (
+                    <option key={fl.name} value={fl.name}>{fl.label}</option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select value={f.operator} onChange={(e) => updateFilter(i, { operator: e.target.value })} style={{ ...selectStyle, flex: opNeedsValue(f.operator) ? '0 0 46%' : 1 }}>
+                    {opsForType(type).map((op) => (
+                      <option key={op} value={op}>{OP_LABELS[op]}</option>
+                    ))}
+                  </select>
+                  {opNeedsValue(f.operator) && (
+                    <input
+                      style={{ ...selectStyle, flex: 1 }}
+                      type={type === 'number' || type === 'date' ? 'number' : 'text'}
+                      value={f.value ?? ''}
+                      onChange={(e) => updateFilter(i, { value: type === 'number' || type === 'date' ? Number(e.target.value) : e.target.value })}
+                      placeholder={type === 'date' ? 'days' : 'value'}
+                    />
+                  )}
+                </div>
+                <button className="chip" onClick={() => removeFilter(i)} style={{ marginTop: 6, borderColor: 'transparent', color: 'var(--color-muted)', padding: '2px 4px' }}>Remove</button>
+              </div>
+            );
+          })}
 
           <h3 style={{ margin: '20px 0 8px' }}>Row limit</h3>
           <input type="number" min={1} max={1000} value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ ...selectStyle, width: 100 }} />
