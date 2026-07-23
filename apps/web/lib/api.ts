@@ -414,3 +414,107 @@ export interface GeneratedLayer {
 }
 export const generateLayer = (projectId: string, sourceSchemaId: string, targetSchemaId: string) =>
   post<GeneratedLayer>(`/mappings/generate-layer/${projectId}`, { sourceSchemaId, targetSchemaId });
+
+// --- Lateral Intelligence (NAI Analyst) -------------------------------------
+
+export interface IntelOverview {
+  kpis: {
+    active_accounts: number;
+    current_outstanding_balance: number;
+    net_collections: number;
+    promise_kept_rate: number;
+  };
+  dataFreshness: string;
+}
+export const intelOverview = () => api<IntelOverview>('/intelligence/overview');
+
+export interface IntelMetric {
+  metric_id: string;
+  display_name: string;
+  description: string;
+  format: string;
+  certification: string;
+  sensitivity: string;
+  version: string;
+}
+export const intelMetrics = () => api<IntelMetric[]>('/intelligence/catalog/metrics');
+
+export interface Breakdown {
+  key: string;
+  accounts: number;
+  balance: number;
+}
+export interface AskPopulationResult {
+  kind: 'population';
+  answer: string;
+  accounts: number;
+  balance: number;
+  criteria: string;
+  predicates: unknown[];
+  breakdowns: Record<string, Breakdown[]>;
+  dataFreshness: string;
+  assumptions: string[];
+  followUps: string[];
+  actions: string[];
+}
+export interface AskMetricResult {
+  kind: 'metric';
+  answer: string;
+  metricsUsed: string[];
+  definitions: Array<Record<string, unknown>>;
+  rows: Array<Record<string, unknown>>;
+  dataFreshness: string;
+  assumptions: string[];
+}
+export interface AskClarifyResult {
+  kind: 'clarify';
+  clarify: string;
+}
+export type AskResult = AskPopulationResult | AskMetricResult | AskClarifyResult;
+export const intelAsk = (nl: string) => post<AskResult>('/intelligence/ask', { nl });
+
+export interface Population {
+  id: string;
+  name: string;
+  type: string;
+  predicates: unknown[];
+  breakdowns: unknown[];
+  createdAt: string;
+}
+export const listPopulations = () => api<Population[]>('/intelligence/populations');
+export const savePopulation = (name: string, predicates: unknown[], breakdowns?: string[]) =>
+  post<{ id: string; name: string; type: string }>('/intelligence/populations', { name, predicates, breakdowns });
+
+export interface ActionPreview {
+  actionId: string;
+  actionType: 'create_worklist';
+  selected: number;
+  eligible: number;
+  excluded: number;
+  excludedReasons: Record<string, number>;
+  eligibleBalance: number;
+  params: Record<string, unknown>;
+}
+export const previewAction = (populationId: string, params: Record<string, unknown>) =>
+  post<ActionPreview>('/intelligence/actions/preview', { populationId, actionType: 'create_worklist', params });
+
+export interface ActionResult {
+  actionId: string;
+  ref: string;
+  added: number;
+  failed: number;
+  deepLink: string;
+}
+export const confirmAction = (actionId: string) =>
+  post<ActionResult>(`/intelligence/actions/${actionId}/confirm`, {});
+
+export interface AuditEvent {
+  id: string;
+  category: string;
+  action: string;
+  userId: string | null;
+  detail: Record<string, unknown>;
+  createdAt: string;
+}
+export const listAudit = (category?: string) =>
+  api<AuditEvent[]>(`/intelligence/audit${category ? `?category=${category}` : ''}`);

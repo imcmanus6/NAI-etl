@@ -574,6 +574,57 @@ model AuditEvent {
   @@map("audit_events")
 }
 
+// ---------------------------------------------------------------------------
+// NAI Analyst / Lateral Intelligence (analytics + actions control tables)
+// ---------------------------------------------------------------------------
+
+model NaiPopulation {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  name       String
+  type       String   @default("dynamic") // dynamic | static
+  predicates Json     @default("[]")
+  breakdowns Json     @default("[]")
+  staticIds  Json?    @map("static_ids")
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@map("nai_populations")
+}
+
+model NaiActionRequest {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  actionType   String   @map("action_type")
+  populationId String?  @map("population_id")
+  status       String   @default("proposed") // proposed | previewed | executed | failed | rejected
+  params       Json     @default("{}")
+  preview      Json?
+  result       Json?
+  lateralRef   String?  @map("lateral_ref")
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("nai_action_requests")
+}
+
+model NaiAuditEvent {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  category  String
+  action    String
+  detail    Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@map("nai_audit_events")
+}
+
 model GeneratedDocument {
   id               String   @id @default(uuid())
   tenantId         String   @map("tenant_id")

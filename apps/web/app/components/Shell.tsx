@@ -27,6 +27,7 @@ const NAV: Array<[string, string]> = [
   ['/connections', 'Connections'],
   ['/schemas', 'Schemas'],
   ['/projects', 'Projects'],
+  ['/intelligence', 'Intelligence'],
 ];
 
 export function Shell({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {
@@ -50,11 +51,14 @@ export function Shell({ children, title, subtitle }: { children: ReactNode; titl
       <aside className="sidebar">
         <div className="brand">{productName}</div>
         <nav className="nav">
-          {NAV.map(([href, label]) => (
-            <Link key={href} href={href} style={pathname === href ? { background: 'var(--color-bg)', fontWeight: 600 } : undefined}>
-              {label}
-            </Link>
-          ))}
+          {NAV.map(([href, label]) => {
+            const active = href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
+            return (
+              <Link key={href} href={href} style={active ? { background: 'var(--color-bg)', fontWeight: 600 } : undefined}>
+                {label}
+              </Link>
+            );
+          })}
         </nav>
       </aside>
       <main className="main">

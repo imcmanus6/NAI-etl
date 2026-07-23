@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module.js';
 import { HealthController } from './health/health.controller.js';
 import { ConnectionsModule } from './connections/connections.module.js';
+import { IntelligenceModule } from './intelligence/intelligence.module.js';
 import { MappingsModule } from './mappings/mappings.module.js';
 import { MigrationModule } from './migration/migration.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
@@ -25,6 +26,7 @@ import { VersionsModule } from './versions/versions.module.js';
     TestRunsModule,
     MigrationModule,
     ScheduleModule,
+    IntelligenceModule,
   ],
   controllers: [HealthController],
 })
