@@ -7,13 +7,14 @@ import {
   compilePopulationAccounts,
   compilePopulationBreakdown,
   compilePopulationSummary,
-  planQuestion,
   summarizeEligibility,
   validateSql,
   type AccountRow,
   type PopulationQuery,
   type Predicate,
 } from '@nai/core';
+import { createAiProvider } from '@etl/ai-service';
+import { AiPlanner } from './aiPlanner.js';
 
 const lateral = new StubLateralActionClient();
 
@@ -26,6 +27,9 @@ const lateral = new StubLateralActionClient();
  */
 @Injectable()
 export class IntelligenceService {
+  /** Claude-backed planner (Opus for NL→IR); deterministic fallback with no key. */
+  private readonly planner = new AiPlanner(createAiProvider(process.env.NAI_AI_PROVIDER ?? 'anthropic', process.env));
+
   /** Run a guard-validated SELECT against the reporting schema (read-only). */
   private async runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
     const guard = validateSql(sql);
@@ -80,10 +84,10 @@ export class IntelligenceService {
 
   /** ASK — natural language → structured plan → result + explanation. */
   async ask(tenantId: string, userId: string | undefined, nl: string) {
-    const planned = planQuestion(nl);
+    const planned = await this.planner.plan(nl);
     if (!planned.plan) {
-      await this.audit(tenantId, userId, 'ai', 'ask.clarify', { nl });
-      return { kind: 'clarify' as const, clarify: planned.clarify };
+      await this.audit(tenantId, userId, 'ai', 'ask.clarify', { nl, source: planned.source });
+      return { kind: 'clarify' as const, clarify: planned.clarify, planner: planned.source };
     }
 
     if (planned.plan.grain === 'account') {
@@ -96,33 +100,40 @@ export class IntelligenceService {
       }
       const accounts = Number(summary?.accounts ?? 0);
       const balance = Number(summary?.balance ?? 0);
-      await this.audit(tenantId, userId, 'query', 'ask.population', { nl, criteria: planned.understood, row_count: accounts, dataFreshness: this.freshness() });
+      const narration = await this.planner.narrate(nl, JSON.stringify({ accounts, balance, criteria: planned.understood, breakdowns }));
+      await this.audit(tenantId, userId, 'query', 'ask.population', { nl, criteria: planned.understood, row_count: accounts, source: planned.source, dataFreshness: this.freshness() });
       return {
         kind: 'population' as const,
         answer: `${accounts.toLocaleString()} accounts found · $${balance.toLocaleString(undefined, { maximumFractionDigits: 0 })} outstanding.`,
         accounts,
         balance,
         criteria: planned.understood,
+        narrative: narration?.narrative,
         predicates: plan.predicates,
         breakdowns,
         dataFreshness: this.freshness(),
         assumptions: planned.assumptions,
-        followUps: ['Save this as a population', 'Break down by collector', 'Create a worklist for these accounts'],
+        followUps: narration?.followUps?.length ? narration.followUps : ['Save this as a population', 'Break down by collector', 'Create a worklist for these accounts'],
         actions: ['save_population', 'create_worklist', 'export'],
+        planner: planned.source,
       };
     }
 
     // metric query
     const rows = await this.runSql(compileMetric(planned.plan));
-    await this.audit(tenantId, userId, 'query', 'ask.metric', { nl, metrics: planned.metricsUsed, row_count: rows.length, dataFreshness: this.freshness() });
+    const narration = await this.planner.narrate(nl, JSON.stringify({ answer: planned.understood, rows }));
+    await this.audit(tenantId, userId, 'query', 'ask.metric', { nl, metrics: planned.metricsUsed, row_count: rows.length, source: planned.source, dataFreshness: this.freshness() });
     return {
       kind: 'metric' as const,
       answer: planned.understood,
+      narrative: narration?.narrative,
       metricsUsed: planned.metricsUsed,
       definitions: planned.metricsUsed.map((id) => ({ id, ...METRICS[id]! })),
       rows,
       dataFreshness: this.freshness(),
       assumptions: planned.assumptions,
+      followUps: narration?.followUps ?? [],
+      planner: planned.source,
     };
   }
 
