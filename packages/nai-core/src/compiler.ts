@@ -6,6 +6,7 @@
  * checked by the SQL Guard before it can run against the read-only DB.
  */
 import { FIELDS, METRICS } from './catalog.js';
+import { applySchema } from './schema.js';
 import type { MetricQuery, Operator, PopulationQuery, Predicate } from './ir.js';
 
 function lit(v: string | number | undefined): string {
@@ -60,13 +61,13 @@ export function whereClause(preds: Predicate[]): string {
 }
 
 export function compilePopulationSummary(p: PopulationQuery): string {
-  return `select count(*)::int as accounts, coalesce(sum(current_balance),0)::numeric as balance from reporting.account_current ${whereClause(p.predicates)}`.trim();
+  return applySchema(`select count(*)::int as accounts, coalesce(sum(current_balance),0)::numeric as balance from reporting.account_current ${whereClause(p.predicates)}`.trim());
 }
 
 export function compilePopulationBreakdown(p: PopulationQuery, dim: string): string {
   const f = FIELDS[dim];
   if (!f || !f.dimension) throw new Error(`invalid dimension: ${dim}`);
-  return `select ${f.column}::text as key, count(*)::int as accounts, coalesce(sum(current_balance),0)::numeric as balance from reporting.account_current ${whereClause(p.predicates)} group by ${f.column} order by accounts desc limit 50`.trim();
+  return applySchema(`select ${f.column}::text as key, count(*)::int as accounts, coalesce(sum(current_balance),0)::numeric as balance from reporting.account_current ${whereClause(p.predicates)} group by ${f.column} order by accounts desc limit 50`.trim());
 }
 
 export function compilePopulationAccounts(p: PopulationQuery, columns: string[], limit = 500): string {
@@ -76,7 +77,7 @@ export function compilePopulationAccounts(p: PopulationQuery, columns: string[],
     return `${f.column} as ${name}`;
   });
   const n = Math.min(Math.max(1, limit), 5000);
-  return `select ${cols.join(', ')} from reporting.account_current ${whereClause(p.predicates)} order by current_balance desc limit ${n}`.trim();
+  return applySchema(`select ${cols.join(', ')} from reporting.account_current ${whereClause(p.predicates)} order by current_balance desc limit ${n}`.trim());
 }
 
 export function compileMetric(p: MetricQuery): string {
@@ -94,5 +95,5 @@ export function compileMetric(p: MetricQuery): string {
   const group = dims.length ? `group by ${dims.map((d) => d.sql).join(', ')}` : '';
   const order = dims.length ? `order by ${m.metric_id} desc nulls last` : '';
   const lim = p.limit ? `limit ${Math.min(Math.max(1, p.limit), 1000)}` : '';
-  return `select ${[...selDims, `${m.expr} as ${m.metric_id}`].join(', ')} from ${m.from} ${wh} ${group} ${order} ${lim}`.replace(/\s+/g, ' ').trim();
+  return applySchema(`select ${[...selDims, `${m.expr} as ${m.metric_id}`].join(', ')} from ${m.from} ${wh} ${group} ${order} ${lim}`.replace(/\s+/g, ' ').trim());
 }

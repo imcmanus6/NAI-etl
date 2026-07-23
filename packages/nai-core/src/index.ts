@@ -5,6 +5,7 @@
  * a metric pack, a permission adapter and a LateralActionClient implementation.
  */
 export * from './catalog.js';
+export * from './schema.js';
 export * from './ir.js';
 export * from './planner.js';
 export * from './compiler.js';

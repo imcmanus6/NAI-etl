@@ -7,6 +7,7 @@
  * primary control; the keyword checks are belt-and-braces.
  */
 import { REPORTING_VIEWS } from './catalog.js';
+import { reportingSchema } from './schema.js';
 
 const FORBIDDEN =
   /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|merge|call|execute|copy|into|vacuum|analyze|lock|do)\b/i;
@@ -26,10 +27,13 @@ export function validateSql(sql: string): GuardResult {
   if (FORBIDDEN_FN.test(s)) return { ok: false, reason: 'contains a forbidden function' };
   if (SYSTEM.test(s)) return { ok: false, reason: 'references a system schema/function' };
 
-  // Every FROM/JOIN target must be an allow-listed reporting view.
+  // Every FROM/JOIN target must be an allow-listed reporting view, resolved to
+  // the active (per-client) reporting schema.
+  const schema = reportingSchema();
+  const allowed = (REPORTING_VIEWS as readonly string[]).map((v) => v.replace(/^reporting\./, `${schema}.`));
   const refs = [...s.matchAll(/\b(?:from|join)\s+([a-zA-Z_][\w.]*)/gi)].map((m) => m[1]!.toLowerCase());
   for (const r of refs) {
-    if (!(REPORTING_VIEWS as readonly string[]).includes(r)) {
+    if (!allowed.includes(r)) {
       return { ok: false, reason: `table not allow-listed: ${r}` };
     }
   }
