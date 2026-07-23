@@ -12,7 +12,11 @@ const STYLE = `<style>
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   a{color:var(--link);text-decoration:none}
   header{padding:20px clamp(16px,3vw,32px) 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .toprow{display:flex;align-items:center;justify-content:space-between;gap:12px}
   h1{margin:0 0 3px;font-size:18px;font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+  .themebtn{border:1px solid var(--line);background:var(--panel-2);color:var(--muted);cursor:pointer;
+    width:32px;height:32px;border-radius:8px;font-size:16px;line-height:1;flex:none}
+  .themebtn:hover{color:var(--ink);border-color:var(--accent)}
   .sub{color:var(--muted);font-size:12.5px;max-width:74ch}
   .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .chip{display:inline-flex;align-items:baseline;gap:5px;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:12px;color:var(--muted)}
@@ -59,6 +63,11 @@ const STYLE = `<style>
 
 const APP = `<script id="data" type="application/json">__DATA__</script>
 <script>
+// theme toggle — decouple from OS so the page looks the same however it's opened
+(function(){ const r=document.documentElement, btn=document.getElementById('theme');
+  const saved=localStorage.getItem('lse-theme'); if(saved) r.setAttribute('data-theme',saved);
+  btn.onclick=()=>{ const cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    const next=cur==='dark'?'light':'dark'; r.setAttribute('data-theme',next); localStorage.setItem('lse-theme',next); }; })();
 const S=JSON.parse(document.getElementById('data').textContent);
 const byName=Object.fromEntries(S.tables.map(t=>[t.name,t]));
 const refBy={}; for(const t of S.tables) for(const r of t.relationships){ (refBy[r.references]??=[]).push({from:t.name,column:r.column}); }
@@ -83,11 +92,15 @@ renderSide(); select(S.tables[0].name);
 </script>`;
 
 for (const s of DATA.schemas) {
-  const page = `<meta charset="utf-8">
+  const page = `<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>${s.label} — Schema Explorer</title>
 ${STYLE}
 <header>
-  <h1>${s.label} — Schema Explorer</h1>
+  <div class="toprow"><h1>${s.label} — Schema Explorer</h1>
+    <button id="theme" class="themebtn" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button></div>
   <div class="sub">${s.source}. Relationships are <span class="warn">inferred from column naming</span> — no foreign-key constraints, so verify a join before relying on it.</div>
   <div class="chips" id="chips"></div>
   <div class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>
