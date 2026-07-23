@@ -8,6 +8,7 @@ import { Shell } from '../components/Shell';
 const TABS: Array<[string, string]> = [
   ['/intelligence', 'Overview'],
   ['/intelligence/ask', 'Ask AI'],
+  ['/intelligence/reports', 'Reports'],
   ['/intelligence/populations', 'Populations'],
   ['/intelligence/audit', 'Audit'],
 ];

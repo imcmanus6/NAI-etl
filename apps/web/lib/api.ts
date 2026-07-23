@@ -518,3 +518,88 @@ export interface AuditEvent {
 }
 export const listAudit = (category?: string) =>
   api<AuditEvent[]>(`/intelligence/audit${category ? `?category=${category}` : ''}`);
+
+// --- Report builder ---------------------------------------------------------
+
+export interface CatalogMetric {
+  metric_id: string;
+  display_name: string;
+  description: string;
+  format: 'count' | 'currency' | 'percent';
+  certification: string;
+  from: string;
+}
+export interface CatalogDimension {
+  name: string;
+  label: string;
+  view: string;
+}
+export interface ReportCatalog {
+  metrics: CatalogMetric[];
+  dimensions: CatalogDimension[];
+  fields: Array<{ name: string; type: string; label: string }>;
+}
+export const reportCatalog = () => api<ReportCatalog>('/intelligence/report-catalog');
+
+export interface ReportSpec {
+  metrics: string[];
+  dimensions?: string[];
+  filters?: Array<{ field: string; operator: string; value?: string | number }>;
+  sort?: Array<{ field: string; direction: 'asc' | 'desc' }>;
+  limit?: number;
+  chart?: 'bar' | 'line' | 'none';
+}
+export interface ReportRun {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+  metrics: Array<{ id: string; display_name: string; format: string; description: string }>;
+  warnings: string[];
+  dataFreshness: string;
+}
+export const runReport = (spec: ReportSpec) => post<ReportRun>('/intelligence/reports/run', { spec });
+
+export interface AssistResult {
+  understood: string;
+  assumptions: string[];
+  planner: 'ai' | 'deterministic';
+  spec: ReportSpec | null;
+  clarify?: string;
+}
+export const assistReport = (nl: string) => post<AssistResult>('/intelligence/reports/assist', { nl });
+
+export interface SavedReport {
+  id: string;
+  name: string;
+  spec: ReportSpec;
+  cron: string | null;
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastRows: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export const listReports = () => api<SavedReport[]>('/intelligence/reports');
+export const saveReport = (name: string, spec: ReportSpec) => post<SavedReport>('/intelligence/reports', { name, spec });
+export const runSavedReport = (id: string) => api<{ report: { id: string; name: string; spec: ReportSpec } } & ReportRun>(`/intelligence/reports/${id}/run`);
+export const runReportNow = (id: string) => post<{ rows: number; outputKey: string | null }>(`/intelligence/reports/${id}/run-now`, {});
+export const scheduleReport = (id: string, cron: string | null, enabled: boolean) =>
+  api<SavedReport>(`/intelligence/reports/${id}/schedule`, { method: 'PUT', body: JSON.stringify({ cron, enabled }) });
+export const deleteReport = (id: string) => api<{ deleted: boolean }>(`/intelligence/reports/${id}`, { method: 'DELETE' });
+
+/** Download a saved report's CSV (auth header → blob → browser download). */
+export async function downloadReportCsv(id: string, name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/intelligence/reports/${id}/export`, {
+    headers: { ...(token() ? { Authorization: `Bearer ${token()}` } : {}) },
+  });
+  if (!res.ok) throw new Error(`Export failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${name.replace(/[^\w.-]+/g, '_')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
