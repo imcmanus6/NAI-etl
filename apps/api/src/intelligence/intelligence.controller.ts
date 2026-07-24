@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import type { AuthClaims } from '@etl/auth';
-import type { PopulationQuery, Predicate } from '@nai/core';
+import type { FilterNode, PopulationQuery, Predicate } from '@nai/core';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt.guard.js';
 import { IntelligenceService, type ReportSpec } from './intelligence.service.js';
 
@@ -58,6 +58,38 @@ class ScheduleReportDto {
 
   @IsBoolean()
   enabled!: boolean;
+}
+
+class InventorySearchDto {
+  @IsOptional()
+  @IsObject()
+  filter?: FilterNode;
+
+  @IsOptional()
+  @IsArray()
+  columns?: string[];
+
+  @IsOptional()
+  rowLimit?: number;
+
+  @IsOptional()
+  idLimit?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  includeIds?: boolean;
+}
+
+class InventoryActionDto {
+  @IsOptional()
+  @IsObject()
+  filter?: FilterNode;
+
+  @IsIn(['create_worklist'])
+  actionType!: 'create_worklist';
+
+  @IsObject()
+  params!: Record<string, unknown>;
 }
 
 @ApiTags('intelligence')
@@ -161,5 +193,22 @@ export class IntelligenceController {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(csv);
+  }
+
+  // --- Inventory search + batch actions -------------------------------------
+
+  @Post('inventory/search')
+  inventorySearch(@CurrentUser() u: AuthClaims, @Body() dto: InventorySearchDto) {
+    return this.svc.inventorySearch(u.tenantId, u.sub, dto);
+  }
+
+  @Post('inventory/actions/preview')
+  inventoryPreview(@CurrentUser() u: AuthClaims, @Body() dto: InventoryActionDto) {
+    return this.svc.inventoryActionPreview(u.tenantId, u.sub, dto);
+  }
+
+  @Post('inventory/actions/:id/confirm')
+  inventoryConfirm(@CurrentUser() u: AuthClaims, @Param('id') id: string) {
+    return this.svc.inventoryActionConfirm(u.tenantId, u.sub, id);
   }
 }

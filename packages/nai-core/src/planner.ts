@@ -103,6 +103,7 @@ export function planQuestion(nl: string): PlanResult {
 
 const OP_TEXT: Record<Operator, string> = {
   eq: 'is', neq: 'is not', gt: 'over', gte: '≥', lt: 'under', lte: '≤',
+  in: 'in', not_in: 'not in', is_set: 'is set', is_empty: 'is empty',
   is_true: 'is set', is_false: 'is not set', older_than_days: 'older than', within_days: 'within',
 };
 

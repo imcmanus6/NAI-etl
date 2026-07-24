@@ -41,6 +41,22 @@ export const FIELDS: Record<string, FieldDef> = {
   has_compliance_hold: { name: 'has_compliance_hold', view: 'reporting.account_current', column: 'has_compliance_hold', type: 'boolean', sensitivity: 'public' },
   has_active_arrangement: { name: 'has_active_arrangement', view: 'reporting.account_current', column: 'has_active_arrangement', type: 'boolean', sensitivity: 'public' },
   is_locked: { name: 'is_locked', view: 'reporting.account_current', column: 'is_locked', type: 'boolean', sensitivity: 'public' },
+
+  // --- Inventory-search fields (client-requested "35 filters"; mostly case +
+  // debtor columns, plus a few history-derived last-* dates). ----------------
+  assigned_at: { name: 'assigned_at', view: 'reporting.account_current', column: 'opened_at', type: 'date', sensitivity: 'public', label: 'Assignment date' },
+  amount_paid: { name: 'amount_paid', view: 'reporting.account_current', column: 'amount_paid', type: 'number', sensitivity: 'financial', label: 'Amount paid' },
+  last_payment_at: { name: 'last_payment_at', view: 'reporting.account_current', column: 'last_payment_at', type: 'date', sensitivity: 'public', label: 'Last payment date' },
+  last_call_result_at: { name: 'last_call_result_at', view: 'reporting.account_current', column: 'last_call_result_at', type: 'date', sensitivity: 'public', label: 'Last call result date' },
+  last_call_result: { name: 'last_call_result', view: 'reporting.account_current', column: 'last_call_result', type: 'string', sensitivity: 'public', dimension: true, label: 'Last call result' },
+  last_email_at: { name: 'last_email_at', view: 'reporting.account_current', column: 'last_email_at', type: 'date', sensitivity: 'public', label: 'Last email date' },
+  last_sms_at: { name: 'last_sms_at', view: 'reporting.account_current', column: 'last_sms_at', type: 'date', sensitivity: 'public', label: 'Last SMS date' },
+  last_letter_at: { name: 'last_letter_at', view: 'reporting.account_current', column: 'last_letter_at', type: 'date', sensitivity: 'public', label: 'Last letter date' },
+  next_contact_at: { name: 'next_contact_at', view: 'reporting.account_current', column: 'next_contact_at', type: 'date', sensitivity: 'public', label: 'Next contact date' },
+  province: { name: 'province', view: 'reporting.account_current', column: 'province', type: 'string', sensitivity: 'public', dimension: true, label: 'Province / state' },
+  has_phone: { name: 'has_phone', view: 'reporting.account_current', column: 'has_phone', type: 'boolean', sensitivity: 'public', label: 'Has phone' },
+  has_email: { name: 'has_email', view: 'reporting.account_current', column: 'has_email', type: 'boolean', sensitivity: 'public', label: 'Has email' },
+  credit_score: { name: 'credit_score', view: 'reporting.account_current', column: 'credit_score', type: 'number', sensitivity: 'pii', label: 'Credit score' },
 };
 
 export interface MetricDef {

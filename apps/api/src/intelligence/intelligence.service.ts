@@ -6,6 +6,9 @@ import {
   FIELDS,
   METRICS,
   StubLateralActionClient,
+  compileInventoryCount,
+  compileInventoryIds,
+  compileInventoryRows,
   compileMetric,
   compilePopulationAccounts,
   compilePopulationBreakdown,
@@ -13,6 +16,7 @@ import {
   summarizeEligibility,
   validateSql,
   type AccountRow,
+  type FilterNode,
   type MetricQuery,
   type PopulationQuery,
   type Predicate,
@@ -443,7 +447,65 @@ export class IntelligenceService implements OnModuleInit {
     await this.audit(tenantId, undefined, 'report', 'report.deleted', { id });
     return { deleted: true };
   }
+
+  // --- Inventory search + batch actions -------------------------------------
+
+  /** Filter live accounts by a boolean filter tree → count + a grid page (+ ids). */
+  async inventorySearch(tenantId: string, userId: string | undefined, input: { filter?: FilterNode; columns?: string[]; rowLimit?: number; idLimit?: number; includeIds?: boolean }) {
+    const [countRow] = await this.runSql<{ n: number }>(compileInventoryCount(input.filter));
+    const count = Number(countRow?.n ?? 0);
+    const columns = (input.columns?.length ? input.columns : DEFAULT_INV_COLUMNS).filter((c) => FIELDS[c]);
+    const rows = await this.runSql<Record<string, unknown>>(compileInventoryRows(input.filter, columns, input.rowLimit ?? 100));
+    const ids = input.includeIds
+      ? (await this.runSql<{ account_id: number }>(compileInventoryIds(input.filter, input.idLimit ?? 15000))).map((r) => Number(r.account_id))
+      : undefined;
+    await this.audit(tenantId, userId, 'query', 'inventory.search', { count, columns });
+    return { count, columns, rows, ids, dataFreshness: this.freshness() };
+  }
+
+  private inventoryAccounts(filter?: FilterNode) {
+    return this.runSql<AccountRow>(compileInventoryRows(filter, ['account_id', 'current_balance', 'has_compliance_hold', 'has_active_arrangement', 'is_locked'], 50000));
+  }
+
+  /** Preview a batch action over the current filter selection (eligibility split). */
+  async inventoryActionPreview(tenantId: string, userId: string | undefined, input: { filter?: FilterNode; actionType: 'create_worklist'; params: Record<string, unknown> }) {
+    const accounts = await this.inventoryAccounts(input.filter);
+    const eligibility = await lateral.validateEligibility(accounts, { type: input.actionType, params: input.params });
+    const summary = summarizeEligibility(accounts, eligibility);
+    const req = await prisma.naiActionRequest.create({
+      data: {
+        tenantId,
+        actionType: input.actionType,
+        populationId: null,
+        status: 'previewed',
+        params: { ...input.params, filter: input.filter ?? null } as object,
+        preview: { selected: summary.selected, eligible: summary.eligible, excluded: summary.excluded, excludedReasons: summary.excludedReasons, eligibleBalance: summary.eligibleBalance } as object,
+        createdBy: userId ?? null,
+      },
+    });
+    await this.audit(tenantId, userId, 'action', 'action.proposed', { actionId: req.id, type: input.actionType, source: 'inventory', selected: summary.selected, eligible: summary.eligible, excluded: summary.excluded });
+    return { actionId: req.id, actionType: input.actionType, selected: summary.selected, eligible: summary.eligible, excluded: summary.excluded, excludedReasons: summary.excludedReasons, eligibleBalance: summary.eligibleBalance, params: input.params };
+  }
+
+  /** Confirm → re-run the stored filter → execute via Lateral (stub) → audit. */
+  async inventoryActionConfirm(tenantId: string, userId: string | undefined, actionId: string) {
+    const req = await prisma.naiActionRequest.findFirst({ where: { id: actionId, tenantId } });
+    if (!req) throw new NotFoundException('Action not found');
+    if (req.status === 'executed') throw new BadRequestException('Action already executed');
+    const params = req.params as Record<string, unknown>;
+    const filter = (params.filter ?? undefined) as FilterNode | undefined;
+    const accounts = await this.inventoryAccounts(filter);
+    const eligibility = await lateral.validateEligibility(accounts, { type: 'create_worklist', params });
+    const { eligibleAccounts } = summarizeEligibility(accounts, eligibility);
+    const result = await lateral.execute(eligibleAccounts, { type: 'create_worklist', params });
+    await prisma.naiActionRequest.update({ where: { id: req.id }, data: { status: 'executed', result: result as object, lateralRef: result.ref } });
+    await this.audit(tenantId, userId, 'action', 'action.executed', { actionId: req.id, type: 'create_worklist', source: 'inventory', added: result.added, failed: result.failed, lateralRef: result.ref });
+    return { actionId: req.id, ...result };
+  }
 }
+
+/** Default columns for the inventory results grid. */
+const DEFAULT_INV_COLUMNS = ['account_id', 'status', 'workflow', 'client', 'current_balance', 'last_activity_at', 'has_phone', 'has_email'];
 
 /** Render rows to CSV with a fixed column order; quote/escape safely. */
 function toCsv(columns: string[], rows: Array<Record<string, unknown>>): string {
